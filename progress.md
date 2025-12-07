@@ -26,11 +26,18 @@ Web app for xAI hackathon. Connects to X account, pulls bookmarks/timeline, grou
 7. **Inline Citations** - Briefing and Q&A include `[tweetId]` citations rendered as clickable links
 8. **Podcast Script** - Grokcast-style conversational script with @handles (no inline citations)
 9. **Test Page** - `/test` for manual testing with citation rendering
+10. **Frontend UI** - React + Vite + TypeScript app with NotebookLM-inspired layout:
+    - Login page with feature highlights
+    - Top navigation with sync button and user info
+    - Left sidebar with Topic Spaces list
+    - Center panel with Topic overview and Q&A
+    - Right panel with Guide/Live Pulse/Creator tabs
+
+### To Come Back To
+- [ ] **Summarization quality** - Briefings still too generic, need richer prompts or multi-pass synthesis
 
 ### Not Yet Built
-- [ ] **Summarization quality** - Briefings still too generic, need richer prompts or multi-pass synthesis
 - [ ] Refresh with incremental classification
-- [ ] Frontend UI
 - [ ] Persistent storage
 
 ---
@@ -58,6 +65,20 @@ backend/src/
     ├── x-data.ts                # /api/x/sync, /api/x/posts
     ├── topics.ts                # /api/topics/* + actions
     └── test.ts                  # /test HTML page
+
+frontend/src/
+├── api.ts                       # Backend API client
+├── types.ts                     # TypeScript types
+├── utils.ts                     # Utility functions (citations, etc.)
+├── App.tsx                      # Main app component
+├── App.css                      # App styles
+├── index.css                    # Global styles
+└── components/
+    ├── TopNav.tsx/css           # Top navigation bar
+    ├── Sidebar.tsx/css          # Left sidebar (Topic Spaces)
+    ├── CenterPanel.tsx/css      # Main content area
+    ├── RightPanel.tsx/css       # Guide/Pulse/Creator tabs
+    └── LoginPage.tsx/css        # Login page
 ```
 
 ---

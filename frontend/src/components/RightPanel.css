@@ -1,0 +1,363 @@
+/* Right Panel Styles */
+
+.right-panel {
+  width: var(--right-panel-width);
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.right-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+/* Tabs */
+.right-panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.tab-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-button:hover {
+  color: var(--text-primary);
+}
+
+.tab-button.active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+/* Tab Content */
+.right-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Panel Cards */
+.panel-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.panel-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.panel-card-body {
+  padding: 14px;
+}
+
+.panel-card-placeholder {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+/* Action Button */
+.panel-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--accent-primary);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  transition: background 0.15s;
+  margin-top: 8px;
+}
+
+.panel-action-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.panel-action-button:disabled {
+  background: var(--bg-active);
+  color: var(--text-tertiary);
+}
+
+.panel-action-button.secondary {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.panel-action-button.secondary:hover:not(:disabled) {
+  background: var(--border-color);
+}
+
+.spinner.small {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+/* Briefing Content */
+.briefing-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.briefing-content h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  margin: 0 0 10px 0;
+}
+
+.briefing-content h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 14px 0 8px 0;
+}
+
+.briefing-content p {
+  margin: 0 0 10px 0;
+}
+
+.briefing-content li {
+  margin-bottom: 8px;
+}
+
+/* FAQ */
+.faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.faq-item {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.faq-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.faq-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.faq-answer {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Follow List */
+.follow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.follow-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.follow-item:hover {
+  background: var(--bg-active);
+  text-decoration: none;
+}
+
+.follow-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.follow-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.follow-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.follow-handle {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.follow-link-icon {
+  color: var(--text-tertiary);
+}
+
+/* Pulse Status */
+.pulse-status {
+  background: linear-gradient(135deg, var(--bg-tertiary), var(--accent-muted));
+}
+
+.pulse-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pulse-icon {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.pulse-header h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+
+.pulse-new-count {
+  font-size: 13px;
+  color: var(--accent-primary);
+  font-weight: 500;
+  margin: 0;
+}
+
+/* Pulse Posts */
+.pulse-posts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pulse-post-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.pulse-post-item:hover {
+  background: var(--bg-active);
+}
+
+.pulse-post-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pulse-post-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.pulse-post-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pulse-post-author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pulse-post-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.pulse-post-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Podcast */
+.podcast-content {
+  max-height: 350px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.podcast-script {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.podcast-script .podcast-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  margin: 0 0 12px 0;
+}
+
+.podcast-script p {
+  margin: 0 0 10px 0;
+}
