@@ -99,6 +99,35 @@ router.get('/', (req: Request, res: Response) => {
     .stat-label { font-size: 12px; color: #71767b; }
     .loading { color: #71767b; font-style: italic; }
     a { color: #1d9bf0; }
+    .input-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .input-group label {
+      color: #71767b;
+      min-width: 120px;
+    }
+    .input-group input {
+      background: #000;
+      border: 1px solid #2f3336;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #e7e9ea;
+      width: 100px;
+      font-size: 14px;
+    }
+    .input-group input:focus {
+      outline: none;
+      border-color: #1d9bf0;
+    }
+    .settings-row {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
   </style>
 </head>
 <body>
@@ -116,6 +145,18 @@ router.get('/', (req: Request, res: Response) => {
   <div class="card">
     <h2>X Data Sync</h2>
     <p>Fetch your bookmarks and timeline from X.</p>
+    
+    <div class="settings-row">
+      <div class="input-group">
+        <label for="maxBookmarks">Max Bookmarks:</label>
+        <input type="number" id="maxBookmarks" value="200" min="10" max="1000" step="10">
+      </div>
+      <div class="input-group">
+        <label for="maxTimeline">Max Timeline:</label>
+        <input type="number" id="maxTimeline" value="100" min="10" max="500" step="10">
+      </div>
+    </div>
+    
     <button onclick="syncData()" id="sync-btn">🔄 Sync All Data</button>
     <button onclick="refreshData()" id="refresh-btn">⚡ Refresh (New Posts Only)</button>
     <button onclick="getPosts()">📋 View Cached Posts</button>
@@ -206,10 +247,13 @@ router.get('/', (req: Request, res: Response) => {
       const btn = document.getElementById('sync-btn');
       btn.disabled = true;
       btn.textContent = '⏳ Syncing...';
-      output({ message: 'Syncing data from X...' });
+      
+      const maxBookmarks = document.getElementById('maxBookmarks').value;
+      const maxTimeline = document.getElementById('maxTimeline').value;
+      output({ message: \`Syncing data from X (up to \${maxBookmarks} bookmarks, \${maxTimeline} timeline)...\` });
       
       try {
-        const data = await api('POST', '/api/x/sync');
+        const data = await api('POST', \`/api/x/sync?maxBookmarks=\${maxBookmarks}&maxTimeline=\${maxTimeline}\`);
         output(data);
         
         if (data.success) {
