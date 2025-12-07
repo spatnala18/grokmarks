@@ -1,11 +1,12 @@
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware, requireAuth } from './auth';
 import { store } from '../store/index';
-import { TopicSpaceDetailResponse, SegmentedPodcastScript } from '../types';
+import { TopicSpaceDetailResponse, SegmentedPodcastScript, Post } from '../types';
 import { generateBriefing, generatePodcastScript, answerQuestion, generateThread } from '../services/grok-actions';
 import { extractTrending } from '../services/trending';
 import { generateSegmentedPodcastAudio, getPodcastPath } from '../services/grok-voice';
 import { createCustomTopicSpaces } from '../services/topic-classifier';
+import { searchAllRecentTweets, buildSearchQueryFromTopic } from '../services/x-api';
 import type { VoiceId } from '../services/grok-voice';
 
 const router = Router();
@@ -556,6 +557,174 @@ router.post('/:id/podcast-audio', requireAuth, async (req: AuthenticatedRequest,
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to generate podcast audio',
+    });
+  }
+});
+
+// ============================================
+// Live Tweets Cache (to avoid hitting rate limits)
+// ============================================
+interface LiveTweetsCache {
+  tweets: Post[];
+  query: string;
+  fetchedAt: number;  // Unix timestamp
+  timeRange: string;
+}
+
+const liveTweetsCache = new Map<string, LiveTweetsCache>();
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+/**
+ * Time range options for live tweets
+ */
+type TimeRange = '30min' | '2hr' | '6hr' | '12hr' | '24hr' | 'since_bookmark';
+
+function getStartTimeForRange(range: TimeRange, lastBookmarkTime?: string): string {
+  const now = new Date();
+  
+  switch (range) {
+    case '30min':
+      return new Date(now.getTime() - 30 * 60 * 1000).toISOString();
+    case '2hr':
+      return new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    case '6hr':
+      return new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
+    case '12hr':
+      return new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString();
+    case '24hr':
+      return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    case 'since_bookmark':
+      if (lastBookmarkTime) {
+        return lastBookmarkTime;
+      }
+      // Default to 24hr if no bookmark time
+      return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    default:
+      return new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
+  }
+}
+
+/**
+ * GET /api/topics/:id/live
+ * 
+ * Fetch live/recent tweets related to the topic
+ * Query params:
+ *   - range: TimeRange (30min, 2hr, 6hr, 12hr, 24hr, since_bookmark)
+ *   - force: boolean - skip cache and force refresh
+ * 
+ * Returns up to 10 most relevant tweets
+ */
+router.get('/:id/live', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { id } = req.params;
+  const range = (req.query.range as TimeRange) || '6hr';
+  const forceRefresh = req.query.force === 'true';
+
+  const topicSpace = store.getTopicSpace(session.xUserId, id);
+  
+  if (!topicSpace) {
+    return res.status(404).json({
+      success: false,
+      error: 'Topic Space not found',
+    });
+  }
+
+  // Build cache key
+  const cacheKey = `${session.xUserId}:${id}:${range}`;
+  
+  // Check cache (unless force refresh)
+  if (!forceRefresh) {
+    const cached = liveTweetsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.fetchedAt) < CACHE_TTL_MS) {
+      console.log(`Returning cached live tweets for ${topicSpace.title} (${range})`);
+      return res.json({
+        success: true,
+        data: {
+          tweets: cached.tweets,
+          query: cached.query,
+          timeRange: range,
+          cachedAt: new Date(cached.fetchedAt).toISOString(),
+          fromCache: true,
+        },
+      });
+    }
+  }
+
+  try {
+    // Get trending keywords from the topic for better search
+    const posts = store.getPostsByIds(session.xUserId, topicSpace.bookmarkTweetIds);
+    const trending = extractTrending(posts);
+    
+    // Build STRICTER search query - use AND instead of OR for better relevance
+    // Focus on the topic title and top hashtag
+    const keywords: string[] = [];
+    if (trending.hashtags.length > 0) {
+      keywords.push(trending.hashtags[0].text); // Just top hashtag
+    }
+    
+    const query = buildSearchQueryFromTopic(topicSpace.title, keywords, true, true); // strict mode
+    console.log(`Searching live tweets for "${topicSpace.title}" with query: ${query}`);
+    
+    // Get start time based on range
+    const startTime = getStartTimeForRange(range, topicSpace.lastBookmarkTime);
+    
+    // Search for ALL recent tweets (paginated, max 5 pages = 500 tweets)
+    // Results come back sorted oldest first
+    const result = await searchAllRecentTweets(
+      session.accessToken,
+      query,
+      startTime,
+      5 // Max 5 pages
+    );
+    
+    console.log(`Found ${result.posts.length} live tweets for ${topicSpace.title}`);
+    
+    // Filter out posts that are already bookmarked
+    const bookmarkIds = new Set(topicSpace.bookmarkTweetIds);
+    const liveTweets = result.posts.filter(p => !bookmarkIds.has(p.id));
+    
+    // Update cache
+    liveTweetsCache.set(cacheKey, {
+      tweets: liveTweets,
+      query,
+      fetchedAt: Date.now(),
+      timeRange: range,
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        tweets: liveTweets,
+        query,
+        timeRange: range,
+        cachedAt: new Date().toISOString(),
+        fromCache: false,
+        rateLimitInfo: result.rateLimitInfo,
+      },
+    });
+  } catch (error: any) {
+    console.error('Live tweets error:', error);
+    
+    // Return cached data if available, even if stale
+    const cached = liveTweetsCache.get(cacheKey);
+    if (cached) {
+      return res.json({
+        success: true,
+        data: {
+          tweets: cached.tweets,
+          query: cached.query,
+          timeRange: range,
+          cachedAt: new Date(cached.fetchedAt).toISOString(),
+          fromCache: true,
+          stale: true,
+          error: error.message,
+        },
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch live tweets',
     });
   }
 });

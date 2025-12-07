@@ -22,7 +22,7 @@ export interface Post {
   authorDisplayName: string;
   authorProfileImageUrl: string;
   createdAt: string;
-  source: 'bookmark' | 'timeline';
+  source: 'bookmark' | 'timeline' | 'search';
   url: string;
   topicLabels?: string[];  // Can have multiple topics
   summary?: string;
@@ -162,4 +162,31 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+// ============================================
+// Live Tweets Types
+// ============================================
+
+/**
+ * Time range options for live tweets
+ */
+export type LiveTimeRange = '30min' | '2hr' | '6hr' | '12hr' | '24hr' | 'since_bookmark';
+
+/**
+ * Response from GET /topics/:id/live
+ */
+export interface LiveTweetsResponse {
+  tweets: Post[];
+  query: string;
+  timeRange: LiveTimeRange;
+  cachedAt: string;
+  fromCache: boolean;
+  stale?: boolean;
+  error?: string;
+  rateLimitInfo?: {
+    limit: number;
+    remaining: number;
+    reset: number;
+  };
 }

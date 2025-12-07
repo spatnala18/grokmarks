@@ -13,6 +13,8 @@ import type {
   PodcastAudio,
   SegmentedPodcastScript,
   TopicType,
+  LiveTweetsResponse,
+  LiveTimeRange,
 } from './types';
 
 const API_BASE = 'http://localhost:8000';
@@ -98,4 +100,11 @@ export const topicsApi = {
   
   getHistory: (id: string) =>
     fetchApi<{ actions: ActionResult[] }>('GET', `/api/topics/${id}/history`),
+  
+  // Live tweets - fetch recent tweets related to topic
+  getLiveTweets: (id: string, range: LiveTimeRange = '6hr', force: boolean = false) =>
+    fetchApi<LiveTweetsResponse>(
+      'GET', 
+      `/api/topics/${id}/live?range=${range}&force=${force}`
+    ),
 };

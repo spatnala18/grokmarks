@@ -379,3 +379,275 @@ export async function getTimelinePosts(
 
   return { posts: allPosts, newestId, rateLimitInfo };
 }
+
+// ============================================
+// Search API - For Live Updates
+// ============================================
+
+/**
+ * Search for recent tweets using X Search API
+ * 
+ * @param accessToken - OAuth 2.0 access token
+ * @param query - Search query string
+ * @param startTime - ISO timestamp for start of search window
+ * @param maxResults - Max results (10-100, default 10)
+ */
+export async function searchRecentTweets(
+  accessToken: string,
+  query: string,
+  startTime?: string,
+  maxResults: number = 10
+): Promise<FetchTweetsResult> {
+  try {
+    // Validate and clamp max_results to [10, 100]
+    const clampedMaxResults = Math.min(Math.max(maxResults, 10), 100);
+    
+    const params: Record<string, string> = {
+      'query': query,
+      'tweet.fields': TWEET_FIELDS,
+      'user.fields': USER_FIELDS,
+      'expansions': EXPANSIONS,
+      'max_results': clampedMaxResults.toString(),
+      'sort_order': 'recency',
+    };
+
+    // Only add start_time if it's within the last 7 days (API limit)
+    if (startTime) {
+      const startDate = new Date(startTime);
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      
+      if (startDate > sevenDaysAgo) {
+        params['start_time'] = startTime;
+      } else {
+        // Use 7 days ago as the minimum
+        params['start_time'] = sevenDaysAgo.toISOString();
+        console.log('Adjusted start_time to 7 days ago (API limit)');
+      }
+    }
+    
+    const url = `${X_API_BASE}/tweets/search/recent`;
+    console.log('Search API Request:');
+    console.log('  URL:', url);
+    console.log('  Params:', JSON.stringify(params, null, 2));
+
+    const response = await axios.get<XTweetsResponse>(
+      `${X_API_BASE}/tweets/search/recent`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        params,
+      }
+    );
+
+    const data = response.data;
+    const rateLimitInfo = extractRateLimitInfo(response.headers);
+
+    if (!data.data || data.data.length === 0) {
+      return { posts: [], rateLimitInfo };
+    }
+
+    const userMap = buildUserMap(data.includes?.users);
+    const posts = data.data.map((tweet) => 
+      convertToPost(tweet, userMap, 'search')
+    );
+
+    return {
+      posts,
+      nextToken: data.meta?.next_token,
+      rateLimitInfo,
+    };
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      // Log full error details for debugging
+      console.error('Search API Error Details:');
+      console.error('  Status:', error.response?.status);
+      console.error('  Response:', JSON.stringify(error.response?.data, null, 2));
+      console.error('  Request URL:', error.config?.url);
+      console.error('  Request Params:', JSON.stringify(error.config?.params, null, 2));
+      handleXApiError(error);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Search for ALL recent tweets matching a query (with pagination)
+ * Returns tweets in chronological order (oldest first)
+ * 
+ * @param accessToken - OAuth 2.0 access token
+ * @param query - Search query string
+ * @param startTime - ISO timestamp for start of search window
+ * @param maxPages - Maximum number of pages to fetch (default 5, ~500 tweets max)
+ */
+export async function searchAllRecentTweets(
+  accessToken: string,
+  query: string,
+  startTime?: string,
+  maxPages: number = 5
+): Promise<FetchTweetsResult> {
+  const allPosts: Post[] = [];
+  let nextToken: string | undefined;
+  let rateLimitInfo: RateLimitInfo | undefined;
+  let pageCount = 0;
+  
+  // Adjust start_time if needed (API only goes back 7 days)
+  let adjustedStartTime = startTime;
+  if (startTime) {
+    const startDate = new Date(startTime);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    if (startDate < sevenDaysAgo) {
+      adjustedStartTime = sevenDaysAgo.toISOString();
+      console.log('Adjusted start_time to 7 days ago (API limit)');
+    }
+  }
+  
+  console.log(`Fetching all tweets (max ${maxPages} pages)...`);
+  
+  do {
+    try {
+      const params: Record<string, string> = {
+        'query': query,
+        'tweet.fields': TWEET_FIELDS,
+        'user.fields': USER_FIELDS,
+        'expansions': EXPANSIONS,
+        'max_results': '100', // Max per page
+        'sort_order': 'recency', // Newest first from API
+      };
+      
+      if (adjustedStartTime) {
+        params['start_time'] = adjustedStartTime;
+      }
+      
+      if (nextToken) {
+        params['next_token'] = nextToken;
+      }
+      
+      console.log(`  Fetching page ${pageCount + 1}...`);
+      
+      const response = await axios.get<XTweetsResponse>(
+        `${X_API_BASE}/tweets/search/recent`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          params,
+        }
+      );
+      
+      const data = response.data;
+      rateLimitInfo = extractRateLimitInfo(response.headers);
+      
+      if (data.data && data.data.length > 0) {
+        const userMap = buildUserMap(data.includes?.users);
+        const posts = data.data.map((tweet) => 
+          convertToPost(tweet, userMap, 'search')
+        );
+        allPosts.push(...posts);
+        console.log(`  Got ${posts.length} tweets (total: ${allPosts.length})`);
+      }
+      
+      nextToken = data.meta?.next_token;
+      pageCount++;
+      
+      // Check rate limits - stop if we're running low
+      if (rateLimitInfo && rateLimitInfo.remaining < 5) {
+        console.log('Rate limit low, stopping pagination');
+        break;
+      }
+      
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        console.error('Search pagination error:', error.response?.status);
+        // If we have some results, return them instead of failing
+        if (allPosts.length > 0) {
+          console.log(`Returning ${allPosts.length} tweets despite error`);
+          break;
+        }
+        handleXApiError(error);
+      }
+      throw error;
+    }
+  } while (nextToken && pageCount < maxPages);
+  
+  // Sort by date: oldest first (ascending)
+  allPosts.sort((a, b) => 
+    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+  
+  console.log(`Total tweets fetched: ${allPosts.length} (${pageCount} pages)`);
+  
+  return {
+    posts: allPosts,
+    rateLimitInfo,
+  };
+}
+
+/**
+ * Build a search query from topic keywords
+ * @param title - Topic title
+ * @param keywords - Additional keywords (hashtags, etc)
+ * @param excludeRetweets - Whether to exclude retweets
+ * @param strict - If true, use AND logic (stricter). If false, use OR (broader)
+ */
+export function buildSearchQueryFromTopic(
+  title: string,
+  keywords: string[] = [],
+  excludeRetweets: boolean = true,
+  strict: boolean = true
+): string {
+  const terms: string[] = [];
+  
+  // Add title words (filter out common words)
+  const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'it', 'its']);
+  
+  const titleWords = title
+    .toLowerCase()
+    .replace(/[^\w\s#@]/g, '') // Keep hashtags and mentions
+    .split(/\s+/)
+    .filter(word => word.length > 2 && !stopWords.has(word));
+  
+  // Take key words from title (2-3 depending on strict mode)
+  terms.push(...titleWords.slice(0, strict ? 2 : 3));
+  
+  // Add provided keywords (hashtags)
+  for (const keyword of keywords.slice(0, 2)) {
+    const cleanKeyword = keyword.toLowerCase();
+    if (!terms.includes(cleanKeyword)) {
+      terms.push(keyword); // Keep original case for hashtags
+    }
+  }
+  
+  // Build query based on mode
+  let query: string;
+  if (strict && terms.length > 1) {
+    // STRICT: Use the main topic term, optionally with a hashtag
+    // This ensures all results are about the main topic
+    const mainTerm = terms[0];
+    const hashtag = keywords.find(k => k.startsWith('#'));
+    
+    if (hashtag) {
+      query = `${mainTerm} ${hashtag}`;
+    } else {
+      query = mainTerm;
+    }
+  } else {
+    // BROAD: Use OR for any matching term
+    query = '(' + terms.slice(0, 4).join(' OR ') + ')';
+  }
+  
+  // Exclude retweets for cleaner results
+  if (excludeRetweets) {
+    query += ' -is:retweet';
+  }
+  
+  // Ensure query isn't too long (X API limit is 512 chars)
+  if (query.length > 500) {
+    query = query.substring(0, 500);
+  }
+  
+  console.log('Built search query:', query, strict ? '(strict)' : '(broad)');
+  
+  return query;
+}
+

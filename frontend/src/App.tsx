@@ -387,7 +387,6 @@ function AppContent() {
         />
         <RightPanel
           topic={selectedTopic}
-          onRefreshTopic={handleRefreshTopic}
           highlightedTweetIds={highlightedTweetIds}
         />
       </div>
