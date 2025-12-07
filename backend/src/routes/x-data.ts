@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware, requireAuth } from './auth';
 import { getAllBookmarks, getTimelinePosts } from '../services/x-api';
+import { classifyAndCreateTopicSpaces } from '../services/topic-classifier';
 import { store } from '../store/memory-store';
 import { Post } from '../types';
 
@@ -13,20 +14,22 @@ router.use(authMiddleware);
  * POST /api/x/sync
  * 
  * Fetches bookmarks and timeline posts from X API.
- * Stores them in memory for later classification.
+ * Optionally classifies them into Topic Spaces using Grok.
  * 
  * Query params:
  * - maxBookmarks: Max bookmarks to fetch (default 200)
  * - maxTimeline: Max timeline posts to fetch (default 100)
+ * - classify: Whether to run Grok classification (default true)
  */
 router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const session = req.session!;
   
   const maxBookmarks = parseInt(req.query.maxBookmarks as string) || 200;
   const maxTimeline = parseInt(req.query.maxTimeline as string) || 100;
+  const shouldClassify = req.query.classify !== 'false';
 
   console.log(`Starting sync for @${session.xUsername}...`);
-  console.log(`  Max bookmarks: ${maxBookmarks}, Max timeline: ${maxTimeline}`);
+  console.log(`  Max bookmarks: ${maxBookmarks}, Max timeline: ${maxTimeline}, Classify: ${shouldClassify}`);
 
   try {
     const results: {
@@ -103,10 +106,36 @@ router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Respons
 
     const allPosts = Array.from(allPostsMap.values());
 
-    // Store posts in memory
+    // Store raw posts in memory
     store.savePosts(session.xUserId, allPosts);
 
-    console.log(`Sync complete: ${allPosts.length} unique posts`);
+    console.log(`Fetched ${allPosts.length} unique posts`);
+
+    // Run classification if requested
+    let topicSpaces: any[] = [];
+    let classificationStats: any = null;
+    if (shouldClassify && allPosts.length > 0) {
+      try {
+        console.log('Running Grok classification...');
+        const classified = await classifyAndCreateTopicSpaces(allPosts, session.xUserId);
+        
+        // Update posts with classification results
+        store.savePosts(session.xUserId, classified.posts);
+        
+        // Clear old topic spaces and save new ones
+        store.clearTopicSpaces(session.xUserId);
+        store.saveTopicSpaces(session.xUserId, classified.topicSpaces);
+        
+        topicSpaces = classified.topicSpaces;
+        classificationStats = classified.stats;
+        console.log(`Classification complete: ${topicSpaces.length} Topic Spaces created`);
+      } catch (error: any) {
+        console.error('Classification error:', error.message);
+        results.errors.push(`Classification: ${error.message}`);
+      }
+    }
+
+    console.log(`Sync complete!`);
 
     res.json({
       success: true,
@@ -114,7 +143,14 @@ router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Respons
         totalPosts: allPosts.length,
         bookmarksCount: results.bookmarks.length,
         timelineCount: results.timeline.length,
-        posts: allPosts,
+        topicSpacesCount: topicSpaces.length,
+        topicSpaces: topicSpaces.map(ts => ({
+          id: ts.id,
+          title: ts.title,
+          description: ts.description,
+          postCount: ts.postIds.length,
+        })),
+        classificationStats: classificationStats || undefined,
         errors: results.errors.length > 0 ? results.errors : undefined,
       },
     });

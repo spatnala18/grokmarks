@@ -1,10 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
-import { grokFast, parseJsonResponse, ChatMessage } from './grok';
+import { grokFast, grokStrong, parseJsonResponse, ChatMessage } from './grok';
+import { normalizeLabels, applyTopicCap } from './label-normalizer';
+import { classificationCache } from '../store/classification-cache';
+import { HYPERPARAMS } from '../config/hyperparams';
 import { Post, TopicSpace } from '../types';
 
 // ============================================
-// Topic Classification Service
+// Topic Classification Service (v2)
 // ============================================
+// Improved with:
+// - Per-post caching
+// - Label normalization
+// - Topic cap with Long Tail merging
+// - Configurable hyperparameters
 
 /**
  * Classification result for a single post
@@ -31,32 +39,84 @@ interface TopicInfo {
 }
 
 /**
- * Classify a batch of posts into topics and generate summaries
- * 
- * @param posts - Array of posts to classify
- * @param existingTopics - Optional list of existing topic names to prefer
- * @param batchSize - Number of posts per Grok request (default 20)
+ * Stats from a classification run
+ */
+export interface ClassificationStats {
+  totalPosts: number;
+  cachedPosts: number;
+  classifiedPosts: number;
+  rawLabelCount: number;
+  canonicalLabelCount: number;
+  topicSpaceCount: number;
+  longTailPostCount: number;
+  grokCallsClassification: number;
+  grokCallsNormalization: number;
+  grokCallsDescriptions: number;
+}
+
+/**
+ * Classify posts with caching support
+ * Only sends uncached/changed posts to Grok
  */
 export async function classifyPosts(
   posts: Post[],
-  existingTopics: string[] = [],
-  batchSize: number = 20
-): Promise<Post[]> {
-  if (posts.length === 0) return [];
+  xUserId: string,
+  existingTopics: string[] = []
+): Promise<{ classifiedPosts: Post[]; stats: Partial<ClassificationStats> }> {
+  if (posts.length === 0) {
+    return { classifiedPosts: [], stats: { totalPosts: 0, cachedPosts: 0, classifiedPosts: 0 } };
+  }
 
   const classifiedPosts: Post[] = [];
-  
-  // Process in batches to avoid token limits
-  for (let i = 0; i < posts.length; i += batchSize) {
-    const batch = posts.slice(i, i + batchSize);
-    console.log(`Classifying batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(posts.length / batchSize)}...`);
+  const postsToClassify: Post[] = [];
+  let cachedCount = 0;
+
+  // Step 1: Check cache for each post
+  if (HYPERPARAMS.ENABLE_CACHE && HYPERPARAMS.SKIP_CACHED_POSTS) {
+    for (const post of posts) {
+      const cached = classificationCache.get(xUserId, post.id, post.text);
+      
+      if (cached) {
+        // Use cached classification
+        classifiedPosts.push({
+          ...post,
+          topicLabel: cached.topicLabel,
+          summary: cached.summary,
+        });
+        cachedCount++;
+      } else {
+        // Need to classify
+        postsToClassify.push(post);
+      }
+    }
+
+    if (HYPERPARAMS.LOG_CACHE_STATS) {
+      console.log(`  Cache: ${cachedCount}/${posts.length} posts cached, ${postsToClassify.length} to classify`);
+    }
+  } else {
+    postsToClassify.push(...posts);
+  }
+
+  // Step 2: Classify uncached posts in batches
+  let grokCalls = 0;
+  const batchSize = HYPERPARAMS.CLASSIFICATION_BATCH_SIZE;
+
+  for (let i = 0; i < postsToClassify.length; i += batchSize) {
+    const batch = postsToClassify.slice(i, i + batchSize);
+    const batchNum = Math.floor(i / batchSize) + 1;
+    const totalBatches = Math.ceil(postsToClassify.length / batchSize);
+    console.log(`  Classifying batch ${batchNum}/${totalBatches} (${batch.length} posts)...`);
     
     try {
       const batchResults = await classifyBatch(batch, existingTopics);
+      grokCalls++;
       
-      // Merge classification results into posts
+      // Process results and cache them
+      const cacheEntries: Array<{ postId: string; text: string; topicLabel: string; summary: string }> = [];
+      
       for (const post of batch) {
         const classification = batchResults.find(c => c.id === post.id);
+        
         if (classification) {
           classifiedPosts.push({
             ...post,
@@ -64,12 +124,19 @@ export async function classifyPosts(
             summary: classification.summary,
           });
           
-          // Add new topic to existing topics for consistency
+          cacheEntries.push({
+            postId: post.id,
+            text: post.text,
+            topicLabel: classification.topic,
+            summary: classification.summary,
+          });
+          
+          // Track topics for consistency
           if (!existingTopics.includes(classification.topic)) {
             existingTopics.push(classification.topic);
           }
         } else {
-          // If classification failed, keep post with default values
+          // Classification failed for this post
           classifiedPosts.push({
             ...post,
             topicLabel: 'Uncategorized',
@@ -77,8 +144,14 @@ export async function classifyPosts(
           });
         }
       }
+      
+      // Batch cache the results
+      classificationCache.setMany(xUserId, cacheEntries);
+      
     } catch (error) {
-      console.error(`Error classifying batch:`, error);
+      console.error(`  Error classifying batch:`, error);
+      grokCalls++;
+      
       // On error, add posts with default values
       for (const post of batch) {
         classifiedPosts.push({
@@ -90,7 +163,15 @@ export async function classifyPosts(
     }
   }
 
-  return classifiedPosts;
+  return {
+    classifiedPosts,
+    stats: {
+      totalPosts: posts.length,
+      cachedPosts: cachedCount,
+      classifiedPosts: postsToClassify.length,
+      grokCallsClassification: grokCalls,
+    },
+  };
 }
 
 /**
@@ -100,13 +181,14 @@ async function classifyBatch(
   posts: Post[],
   existingTopics: string[]
 ): Promise<PostClassification[]> {
-  // Build the prompt
+  const maxTextLen = HYPERPARAMS.CLASSIFICATION_MAX_TEXT_LENGTH;
+  
   const postsText = posts.map((p, idx) => 
-    `[${idx + 1}] ID: ${p.id}\n@${p.authorUsername}: ${p.text.slice(0, 500)}`
+    `[${idx + 1}] ID: ${p.id}\n@${p.authorUsername}: ${p.text.slice(0, maxTextLen)}`
   ).join('\n\n');
 
   const topicsHint = existingTopics.length > 0 
-    ? `\nPrefer using these existing topics when appropriate: ${existingTopics.join(', ')}\nBut create new topics if the content doesn't fit.`
+    ? `\nPrefer using these existing topics when appropriate: ${existingTopics.slice(0, 20).join(', ')}\nBut create new topics if the content doesn't fit.`
     : '';
 
   const systemPrompt = `You are a tweet classifier. Your job is to:
@@ -136,18 +218,18 @@ Return your response as JSON with this exact structure:
   ];
 
   const response = await grokFast(messages, {
-    temperature: 0.3, // Lower temperature for more consistent classification
+    temperature: HYPERPARAMS.CLASSIFICATION_TEMPERATURE,
     response_format: { type: 'json_object' },
   });
 
-  console.log(`  Used model: ${response.model}, tokens: ${response.usage.total_tokens}`);
+  console.log(`    Model: ${response.model}, tokens: ${response.usage.total_tokens}`);
 
   const parsed = parseJsonResponse<ClassificationResponse>(response.content);
   return parsed.classifications;
 }
 
 /**
- * Group classified posts into TopicSpaces
+ * Group classified posts by topic label
  */
 export function groupPostsByTopic(posts: Post[]): Map<string, Post[]> {
   const topicGroups = new Map<string, Post[]>();
@@ -163,22 +245,55 @@ export function groupPostsByTopic(posts: Post[]): Map<string, Post[]> {
 }
 
 /**
- * Generate title and description for a topic based on its posts
+ * Count posts per label
+ */
+function countLabels(posts: Post[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  
+  for (const post of posts) {
+    const label = post.topicLabel || 'Uncategorized';
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  
+  return counts;
+}
+
+/**
+ * Apply label mapping to posts
+ */
+function applyLabelMapping(posts: Post[], mapping: Map<string, string>): Post[] {
+  return posts.map(post => {
+    const originalLabel = post.topicLabel || 'Uncategorized';
+    const newLabel = mapping.get(originalLabel) || originalLabel;
+    return { ...post, topicLabel: newLabel };
+  });
+}
+
+/**
+ * Generate title and description for a topic using Grok
  */
 export async function generateTopicInfo(
-  topicLabel: string,
+  canonicalLabel: string,
   posts: Post[]
 ): Promise<TopicInfo> {
-  // For small topics, use simpler description
-  if (posts.length < 3) {
+  // For Long Tail, use a static description
+  if (canonicalLabel === HYPERPARAMS.LONG_TAIL_LABEL) {
     return {
-      title: topicLabel,
-      description: `Collection of ${posts.length} post${posts.length === 1 ? '' : 's'} about ${topicLabel.toLowerCase()}.`,
+      title: 'Miscellaneous',
+      description: `Collection of ${posts.length} posts across various smaller topics.`,
     };
   }
 
-  // Sample posts for the prompt (max 10)
-  const samplePosts = posts.slice(0, 10);
+  // For small topics, use simpler description
+  if (posts.length < HYPERPARAMS.MIN_POSTS_FOR_DESCRIPTION) {
+    return {
+      title: canonicalLabel,
+      description: `${posts.length} post${posts.length === 1 ? '' : 's'} about ${canonicalLabel.toLowerCase()}.`,
+    };
+  }
+
+  // Sample posts for the prompt
+  const samplePosts = posts.slice(0, HYPERPARAMS.MAX_SAMPLE_POSTS_FOR_DESCRIPTION);
   const summaries = samplePosts
     .map(p => `- ${p.summary || p.text.slice(0, 100)}`)
     .join('\n');
@@ -187,36 +302,37 @@ export async function generateTopicInfo(
 
 Guidelines:
 - Title should be catchy but informative (3-6 words)
+- Use the canonical label as a strong hint for the title
 - Description should be 1-2 sentences explaining what this topic covers
 - Base everything ONLY on the tweet summaries provided
 - Don't make up information not in the tweets
 
 Return JSON: { "title": "Topic Title", "description": "Brief description" }`;
 
-  const userPrompt = `Topic label: "${topicLabel}"
+  const userPrompt = `Canonical label: "${canonicalLabel}"
 Number of posts: ${posts.length}
 
 Sample post summaries:
 ${summaries}`;
 
   try {
-    const response = await grokFast(
+    const response = await grokStrong(
       [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       {
-        temperature: 0.5,
+        temperature: HYPERPARAMS.TOPIC_DESCRIPTION_TEMPERATURE,
         response_format: { type: 'json_object' },
       }
     );
 
     return parseJsonResponse<TopicInfo>(response.content);
   } catch (error) {
-    console.error(`Error generating topic info for "${topicLabel}":`, error);
+    console.error(`  Error generating topic info for "${canonicalLabel}":`, error);
     return {
-      title: topicLabel,
-      description: `Collection of ${posts.length} posts about ${topicLabel.toLowerCase()}.`,
+      title: canonicalLabel,
+      description: `${posts.length} posts about ${canonicalLabel.toLowerCase()}.`,
     };
   }
 }
@@ -227,9 +343,10 @@ ${summaries}`;
 export async function createTopicSpaces(
   posts: Post[],
   generateDescriptions: boolean = true
-): Promise<TopicSpace[]> {
+): Promise<{ topicSpaces: TopicSpace[]; grokCalls: number }> {
   const topicGroups = groupPostsByTopic(posts);
   const topicSpaces: TopicSpace[] = [];
+  let grokCalls = 0;
 
   // Sort topics by number of posts (descending)
   const sortedTopics = Array.from(topicGroups.entries())
@@ -239,14 +356,19 @@ export async function createTopicSpaces(
     let title = topicLabel;
     let description = `${topicPosts.length} posts about ${topicLabel.toLowerCase()}`;
 
-    // Generate better title/description for larger topics
-    if (generateDescriptions && topicPosts.length >= 3) {
+    if (generateDescriptions) {
       try {
         const info = await generateTopicInfo(topicLabel, topicPosts);
         title = info.title;
         description = info.description;
+        
+        // Only count as Grok call if we actually called Grok
+        if (topicLabel !== HYPERPARAMS.LONG_TAIL_LABEL && 
+            topicPosts.length >= HYPERPARAMS.MIN_POSTS_FOR_DESCRIPTION) {
+          grokCalls++;
+        }
       } catch (error) {
-        console.error(`Failed to generate info for topic "${topicLabel}"`);
+        console.error(`  Failed to generate info for topic "${topicLabel}"`);
       }
     }
 
@@ -262,26 +384,97 @@ export async function createTopicSpaces(
     });
   }
 
-  return topicSpaces;
+  return { topicSpaces, grokCalls };
 }
 
 /**
  * Full pipeline: classify posts and create TopicSpaces
+ * With caching, normalization, and topic cap
  */
 export async function classifyAndCreateTopicSpaces(
   posts: Post[],
+  xUserId: string,
   existingTopics: string[] = []
-): Promise<{ posts: Post[]; topicSpaces: TopicSpace[] }> {
-  console.log(`Starting classification of ${posts.length} posts...`);
+): Promise<{ posts: Post[]; topicSpaces: TopicSpace[]; stats: ClassificationStats }> {
+  console.log(`\n=== Starting Classification Pipeline ===`);
+  console.log(`  Posts: ${posts.length}, Cache: ${HYPERPARAMS.ENABLE_CACHE ? 'ON' : 'OFF'}, Normalization: ${HYPERPARAMS.ENABLE_NORMALIZATION ? 'ON' : 'OFF'}`);
   
-  // Step 1: Classify posts
-  const classifiedPosts = await classifyPosts(posts, existingTopics);
-  console.log(`Classification complete. Found ${new Set(classifiedPosts.map(p => p.topicLabel)).size} unique topics.`);
+  // Initialize stats
+  const stats: ClassificationStats = {
+    totalPosts: posts.length,
+    cachedPosts: 0,
+    classifiedPosts: 0,
+    rawLabelCount: 0,
+    canonicalLabelCount: 0,
+    topicSpaceCount: 0,
+    longTailPostCount: 0,
+    grokCallsClassification: 0,
+    grokCallsNormalization: 0,
+    grokCallsDescriptions: 0,
+  };
 
-  // Step 2: Create TopicSpaces
-  console.log('Creating Topic Spaces...');
-  const topicSpaces = await createTopicSpaces(classifiedPosts);
-  console.log(`Created ${topicSpaces.length} Topic Spaces.`);
+  if (posts.length === 0) {
+    return { posts: [], topicSpaces: [], stats };
+  }
 
-  return { posts: classifiedPosts, topicSpaces };
+  // Step 1: Classify posts (with caching)
+  console.log(`\n[Step 1] Classifying posts...`);
+  const { classifiedPosts, stats: classifyStats } = await classifyPosts(posts, xUserId, existingTopics);
+  stats.cachedPosts = classifyStats.cachedPosts || 0;
+  stats.classifiedPosts = classifyStats.classifiedPosts || 0;
+  stats.grokCallsClassification = classifyStats.grokCallsClassification || 0;
+
+  // Count raw labels
+  const rawLabelCounts = countLabels(classifiedPosts);
+  stats.rawLabelCount = rawLabelCounts.size;
+  console.log(`  Raw labels: ${stats.rawLabelCount}`);
+
+  // Step 2: Normalize labels (if enabled)
+  console.log(`\n[Step 2] Normalizing labels...`);
+  const normResult = await normalizeLabels(rawLabelCounts);
+  if (normResult.success && HYPERPARAMS.ENABLE_NORMALIZATION) {
+    stats.grokCallsNormalization = 1;
+  }
+  
+  // Step 3: Apply topic cap
+  console.log(`\n[Step 3] Applying topic cap...`);
+  const finalMapping = applyTopicCap(rawLabelCounts, normResult.mapping);
+  
+  // Apply mapping to posts
+  const normalizedPosts = applyLabelMapping(classifiedPosts, finalMapping);
+  
+  // Update cache with normalized labels
+  if (HYPERPARAMS.ENABLE_CACHE) {
+    classificationCache.applyNormalization(xUserId, finalMapping);
+  }
+  
+  // Count canonical labels (excluding Long Tail)
+  const canonicalCounts = countLabels(normalizedPosts);
+  stats.canonicalLabelCount = Array.from(canonicalCounts.keys())
+    .filter(l => l !== HYPERPARAMS.LONG_TAIL_LABEL).length;
+  stats.longTailPostCount = canonicalCounts.get(HYPERPARAMS.LONG_TAIL_LABEL) || 0;
+  
+  console.log(`  Canonical labels: ${stats.canonicalLabelCount}`);
+  if (stats.longTailPostCount > 0) {
+    console.log(`  Long Tail posts: ${stats.longTailPostCount}`);
+  }
+
+  // Step 4: Create TopicSpaces
+  console.log(`\n[Step 4] Creating Topic Spaces...`);
+  const { topicSpaces, grokCalls: descriptionCalls } = await createTopicSpaces(normalizedPosts);
+  stats.topicSpaceCount = topicSpaces.length;
+  stats.grokCallsDescriptions = descriptionCalls;
+
+  // Log final stats
+  if (HYPERPARAMS.LOG_CLASSIFICATION_STATS) {
+    console.log(`\n=== Classification Complete ===`);
+    console.log(`  Total posts: ${stats.totalPosts}`);
+    console.log(`  Cached: ${stats.cachedPosts}, Classified: ${stats.classifiedPosts}`);
+    console.log(`  Raw labels: ${stats.rawLabelCount} → Canonical: ${stats.canonicalLabelCount}`);
+    console.log(`  Topic Spaces: ${stats.topicSpaceCount}`);
+    console.log(`  Grok calls: ${stats.grokCallsClassification} classification + ${stats.grokCallsNormalization} normalization + ${stats.grokCallsDescriptions} descriptions`);
+    console.log(`================================\n`);
+  }
+
+  return { posts: normalizedPosts, topicSpaces, stats };
 }

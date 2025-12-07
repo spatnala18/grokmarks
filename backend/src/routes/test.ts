@@ -144,22 +144,22 @@ router.get('/', (req: Request, res: Response) => {
 
   <div class="card">
     <h2>X Data Sync</h2>
-    <p>Fetch your bookmarks and timeline from X.</p>
+    <p>Fetch your bookmarks and timeline from X, then classify into Topic Spaces using Grok.</p>
     
     <div class="settings-row">
       <div class="input-group">
         <label for="maxBookmarks">Max Bookmarks:</label>
-        <input type="number" id="maxBookmarks" value="200" min="10" max="1000" step="10">
+        <input type="number" id="maxBookmarks" value="50" min="10" max="1000" step="10">
       </div>
       <div class="input-group">
         <label for="maxTimeline">Max Timeline:</label>
-        <input type="number" id="maxTimeline" value="100" min="10" max="500" step="10">
+        <input type="number" id="maxTimeline" value="30" min="10" max="500" step="10">
       </div>
     </div>
     
-    <button onclick="syncData()" id="sync-btn">🔄 Sync All Data</button>
-    <button onclick="refreshData()" id="refresh-btn">⚡ Refresh (New Posts Only)</button>
-    <button onclick="getPosts()">📋 View Cached Posts</button>
+    <button onclick="syncData()" id="sync-btn">🔄 Sync & Classify</button>
+    <button onclick="syncDataNoClassify()" id="sync-no-classify-btn">📥 Sync Only (No Grok)</button>
+    <button onclick="getTopics()">📚 View Topic Spaces</button>
     
     <div class="stats" id="sync-stats" style="display: none;">
       <div class="stat">
@@ -174,7 +174,16 @@ router.get('/', (req: Request, res: Response) => {
         <div class="stat-value" id="stat-timeline">0</div>
         <div class="stat-label">Timeline</div>
       </div>
+      <div class="stat">
+        <div class="stat-value" id="stat-topics">0</div>
+        <div class="stat-label">Topic Spaces</div>
+      </div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Topic Spaces</h2>
+    <div id="topics-container">No topics yet. Click "Sync & Classify" above.</div>
   </div>
 
   <div class="card">
@@ -184,7 +193,7 @@ router.get('/', (req: Request, res: Response) => {
 
   <div class="card">
     <h2>Posts Preview</h2>
-    <div id="posts-container">No posts loaded yet. Click "Sync All Data" above.</div>
+    <div id="posts-container">No posts loaded yet.</div>
   </div>
 
   <script>
@@ -250,7 +259,7 @@ router.get('/', (req: Request, res: Response) => {
       
       const maxBookmarks = document.getElementById('maxBookmarks').value;
       const maxTimeline = document.getElementById('maxTimeline').value;
-      output({ message: \`Syncing data from X (up to \${maxBookmarks} bookmarks, \${maxTimeline} timeline)...\` });
+      output({ message: \`Syncing & classifying (up to \${maxBookmarks} bookmarks, \${maxTimeline} timeline)... This may take a minute.\` });
       
       try {
         const data = await api('POST', \`/api/x/sync?maxBookmarks=\${maxBookmarks}&maxTimeline=\${maxTimeline}\`);
@@ -261,37 +270,94 @@ router.get('/', (req: Request, res: Response) => {
           document.getElementById('stat-total').textContent = data.data.totalPosts;
           document.getElementById('stat-bookmarks').textContent = data.data.bookmarksCount;
           document.getElementById('stat-timeline').textContent = data.data.timelineCount;
+          document.getElementById('stat-topics').textContent = data.data.topicSpacesCount || 0;
+          displayTopics(data.data.topicSpaces || []);
+        }
+      } catch (e) {
+        output({ error: e.message });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 Sync & Classify';
+      }
+    }
+
+    // Sync without classification
+    async function syncDataNoClassify() {
+      const btn = document.getElementById('sync-no-classify-btn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Syncing...';
+      
+      const maxBookmarks = document.getElementById('maxBookmarks').value;
+      const maxTimeline = document.getElementById('maxTimeline').value;
+      output({ message: \`Syncing data (no classification)...\` });
+      
+      try {
+        const data = await api('POST', \`/api/x/sync?maxBookmarks=\${maxBookmarks}&maxTimeline=\${maxTimeline}&classify=false\`);
+        output(data);
+        
+        if (data.success) {
+          document.getElementById('sync-stats').style.display = 'flex';
+          document.getElementById('stat-total').textContent = data.data.totalPosts;
+          document.getElementById('stat-bookmarks').textContent = data.data.bookmarksCount;
+          document.getElementById('stat-timeline').textContent = data.data.timelineCount;
+        }
+      } catch (e) {
+        output({ error: e.message });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📥 Sync Only (No Grok)';
+      }
+    }
+
+    // Get topic spaces
+    async function getTopics() {
+      try {
+        const data = await api('GET', '/api/topics');
+        output(data);
+        
+        if (data.success) {
+          document.getElementById('stat-topics').textContent = data.data.count;
+          displayTopics(data.data.topicSpaces || []);
+        }
+      } catch (e) {
+        output({ error: e.message });
+      }
+    }
+
+    // View a single topic
+    async function viewTopic(topicId) {
+      try {
+        const data = await api('GET', \`/api/topics/\${topicId}\`);
+        output(data);
+        
+        if (data.success) {
           displayPosts(data.data.posts);
         }
       } catch (e) {
         output({ error: e.message });
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '🔄 Sync All Data';
       }
     }
 
-    // Refresh data
-    async function refreshData() {
-      const btn = document.getElementById('refresh-btn');
-      btn.disabled = true;
-      btn.textContent = '⏳ Refreshing...';
-      output({ message: 'Checking for new posts...' });
-      
-      try {
-        const data = await api('POST', '/api/x/refresh');
-        output(data);
-        
-        if (data.success && data.data.newPostsCount > 0) {
-          // Reload all posts to show updated list
-          await getPosts();
-        }
-      } catch (e) {
-        output({ error: e.message });
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '⚡ Refresh (New Posts Only)';
+    // Display topics
+    function displayTopics(topics) {
+      if (!topics || topics.length === 0) {
+        document.getElementById('topics-container').innerHTML = '<p class="loading">No topics found. Run Sync & Classify first.</p>';
+        return;
       }
+
+      const html = topics.map(topic => \`
+        <div class="post" style="cursor: pointer;" onclick="viewTopic('\${topic.id}')">
+          <div class="post-header">
+            <div>
+              <span class="post-author">\${topic.title}</span>
+              <span class="post-username">\${topic.postCount} posts</span>
+            </div>
+          </div>
+          <div class="post-text" style="color: #71767b;">\${topic.description}</div>
+        </div>
+      \`).join('');
+
+      document.getElementById('topics-container').innerHTML = html;
     }
 
     // Get cached posts

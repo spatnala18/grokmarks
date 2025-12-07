@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import { config, validateConfig } from './config';
 import authRoutes from './routes/auth';
 import xDataRoutes from './routes/x-data';
+import topicsRoutes from './routes/topics';
 import testRoutes from './routes/test';
 import { store } from './store/memory-store';
 
@@ -23,6 +24,7 @@ app.use(cookieParser());
 // Routes
 app.use('/auth', authRoutes);
 app.use('/api/x', xDataRoutes);
+app.use('/api/topics', topicsRoutes);
 app.use('/test', testRoutes);
 
 // Health check endpoint
