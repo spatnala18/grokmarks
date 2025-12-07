@@ -99,6 +99,21 @@ router.get('/', (req: Request, res: Response) => {
     .stat-label { font-size: 12px; color: #71767b; }
     .loading { color: #71767b; font-style: italic; }
     a { color: #1d9bf0; }
+    .citation {
+      color: #1d9bf0;
+      font-size: 11px;
+      font-weight: bold;
+      text-decoration: none;
+      vertical-align: super;
+      padding: 0 2px;
+      background: rgba(29, 155, 240, 0.1);
+      border-radius: 3px;
+      margin-left: 1px;
+    }
+    .citation:hover {
+      background: rgba(29, 155, 240, 0.3);
+      text-decoration: none;
+    }
     .input-group {
       display: flex;
       align-items: center;
@@ -184,6 +199,28 @@ router.get('/', (req: Request, res: Response) => {
   <div class="card">
     <h2>Topic Spaces</h2>
     <div id="topics-container">No topics yet. Click "Sync & Classify" above.</div>
+  </div>
+
+  <div class="card" id="actions-card" style="display: none;">
+    <h2>🎯 Actions for: <span id="selected-topic-name">-</span></h2>
+    <input type="hidden" id="selected-topic-id" value="">
+    
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+      <button onclick="generateBriefing()" id="briefing-btn">📋 Generate Briefing</button>
+      <button onclick="generatePodcast()" id="podcast-btn">🎙️ Podcast Script</button>
+    </div>
+    
+    <div style="display: flex; gap: 10px; align-items: flex-end;">
+      <div class="input-group" style="flex: 1;">
+        <label for="question">Ask a Question:</label>
+        <input type="text" id="question" placeholder="What are the main points being discussed?" style="width: 100%;">
+      </div>
+      <button onclick="askQuestion()" id="qa-btn">❓ Ask</button>
+    </div>
+    
+    <div id="action-result" style="margin-top: 15px; padding: 15px; background: #1a1a1a; border-radius: 8px; display: none;">
+      <div id="action-result-content" style="white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -325,28 +362,38 @@ router.get('/', (req: Request, res: Response) => {
     }
 
     // View a single topic
-    async function viewTopic(topicId) {
+    async function viewTopic(topicId, topicTitle) {
       try {
         const data = await api('GET', \`/api/topics/\${topicId}\`);
         output(data);
         
         if (data.success) {
           displayPosts(data.data.posts);
+          selectTopic(topicId, topicTitle || data.data.title);
         }
       } catch (e) {
         output({ error: e.message });
       }
     }
 
+    // Select a topic for actions
+    function selectTopic(topicId, topicTitle) {
+      document.getElementById('selected-topic-id').value = topicId;
+      document.getElementById('selected-topic-name').textContent = topicTitle;
+      document.getElementById('actions-card').style.display = 'block';
+      document.getElementById('action-result').style.display = 'none';
+    }
+
     // Display topics
     function displayTopics(topics) {
       if (!topics || topics.length === 0) {
         document.getElementById('topics-container').innerHTML = '<p class="loading">No topics found. Run Sync & Classify first.</p>';
+        document.getElementById('actions-card').style.display = 'none';
         return;
       }
 
       const html = topics.map(topic => \`
-        <div class="post" style="cursor: pointer;" onclick="viewTopic('\${topic.id}')">
+        <div class="post" style="cursor: pointer;" onclick="viewTopic('\${topic.id}', '\${topic.title.replace(/'/g, "\\\\'")}')">
           <div class="post-header">
             <div>
               <span class="post-author">\${topic.title}</span>
@@ -409,6 +456,103 @@ router.get('/', (req: Request, res: Response) => {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // Generate briefing
+    async function generateBriefing() {
+      const topicId = document.getElementById('selected-topic-id').value;
+      if (!topicId) return alert('Select a topic first');
+      
+      const btn = document.getElementById('briefing-btn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Generating...';
+      
+      try {
+        const data = await api('POST', \`/api/topics/\${topicId}/briefing\`);
+        output(data);
+        
+        if (data.success) {
+          showActionResult(data.data.output);
+        }
+      } catch (e) {
+        output({ error: e.message });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📋 Generate Briefing';
+      }
+    }
+
+    // Generate podcast script
+    async function generatePodcast() {
+      const topicId = document.getElementById('selected-topic-id').value;
+      if (!topicId) return alert('Select a topic first');
+      
+      const btn = document.getElementById('podcast-btn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Generating...';
+      
+      try {
+        const data = await api('POST', \`/api/topics/\${topicId}/podcast\`);
+        output(data);
+        
+        if (data.success) {
+          showActionResult(data.data.output);
+        }
+      } catch (e) {
+        output({ error: e.message });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🎙️ Podcast Script';
+      }
+    }
+
+    // Ask question
+    async function askQuestion() {
+      const topicId = document.getElementById('selected-topic-id').value;
+      const question = document.getElementById('question').value.trim();
+      
+      if (!topicId) return alert('Select a topic first');
+      if (!question) return alert('Enter a question');
+      
+      const btn = document.getElementById('qa-btn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Thinking...';
+      
+      try {
+        const data = await api('POST', \`/api/topics/\${topicId}/qa\`, { question });
+        output(data);
+        
+        if (data.success) {
+          showActionResult(data.data.output);
+        }
+      } catch (e) {
+        output({ error: e.message });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '❓ Ask';
+      }
+    }
+
+    // Show action result with clickable citations
+    function showActionResult(content, groundedPostIds = []) {
+      document.getElementById('action-result').style.display = 'block';
+      
+      // Parse and convert [tweetId] citations to clickable links
+      const processedContent = content.replace(/\\[(\\d{15,25})\\]/g, (match, tweetId) => {
+        // Create a clickable link that opens the tweet
+        return \`<a href="https://x.com/i/status/\${tweetId}" target="_blank" class="citation" title="View tweet \${tweetId}">[↗]</a>\`;
+      });
+      
+      // Convert markdown-style headers and bullets to HTML
+      const htmlContent = processedContent
+        .replace(/^# (.+)$/gm, '<h3 style="color: #1d9bf0; margin-top: 0;">$1</h3>')
+        .replace(/^## (.+)$/gm, '<h4 style="color: #71767b; margin-bottom: 8px;">$1</h4>')
+        .replace(/^• (.+)$/gm, '<li style="margin: 8px 0;">$1</li>')
+        .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+        .replace(/\\n\\n/g, '</p><p>')
+        .replace(/\\n/g, '<br>');
+      
+      document.getElementById('action-result-content').innerHTML = '<p>' + htmlContent + '</p>';
     }
 
     // Initialize

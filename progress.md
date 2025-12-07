@@ -10,7 +10,7 @@ Web app for xAI hackathon. Connects to X account, pulls bookmarks/timeline, grou
 - **Models**: `grok-4-1-fast-non-reasoning` (classification), `grok-4-1-fast-reasoning` (normalization, actions)
 
 ## Current State
-✅ Working end-to-end: Login → Fetch posts → Classify → View Topic Spaces
+✅ Working end-to-end: Login → Fetch posts → Classify → View Topic Spaces → Actions
 
 ### Completed
 1. **X OAuth 2.0 PKCE** - `/auth/login`, `/auth/callback`, `/auth/logout`
@@ -22,10 +22,13 @@ Web app for xAI hackathon. Connects to X account, pulls bookmarks/timeline, grou
    - Label normalization (merges similar topics → ~12 canonical)
    - Topic cap (MAX_TOPICS=20, MIN_POSTS=2, overflow → "Long Tail / Misc")
 5. **Topic Spaces** - Created from classified posts with Grok-generated titles/descriptions
-6. **Test Page** - `/test` for manual testing
+6. **Grok Actions** - Briefing, Podcast Script, Q&A with grounding
+7. **Inline Citations** - Briefing and Q&A include `[tweetId]` citations rendered as clickable links
+8. **Podcast Script** - Grokcast-style conversational script with @handles (no inline citations)
+9. **Test Page** - `/test` for manual testing with citation rendering
 
 ### Not Yet Built
-- [ ] Actions: Briefing, Podcast Script, Q&A
+- [ ] **Summarization quality** - Briefings still too generic, need richer prompts or multi-pass synthesis
 - [ ] Refresh with incremental classification
 - [ ] Frontend UI
 - [ ] Persistent storage
@@ -47,12 +50,13 @@ backend/src/
 │   ├── x-auth.ts                # X OAuth 2.0 PKCE flow
 │   ├── x-api.ts                 # Bookmarks, timeline fetching
 │   ├── grok.ts                  # xAI chat completions
+│   ├── grok-actions.ts          # Briefing, Podcast, Q&A
 │   ├── topic-classifier.ts      # Classification pipeline
 │   └── label-normalizer.ts      # Merge similar labels
 └── routes/
     ├── auth.ts                  # /auth/* endpoints
     ├── x-data.ts                # /api/x/sync, /api/x/posts
-    ├── topics.ts                # /api/topics/*
+    ├── topics.ts                # /api/topics/* + actions
     └── test.ts                  # /test HTML page
 ```
 
@@ -94,6 +98,26 @@ Location: `backend/src/config/hyperparams.ts`
 | GET | `/api/topics` | List all topic spaces |
 | GET | `/api/topics/:id` | Get topic with posts |
 | POST | `/api/topics/:id/mark-seen` | Reset new post count |
+| POST | `/api/topics/:id/briefing` | Generate briefing summary |
+| POST | `/api/topics/:id/podcast` | Generate podcast script |
+| POST | `/api/topics/:id/qa` | Answer question (body: `{question}`) |
+| GET | `/api/topics/:id/history` | Get action history |
+
+---
+
+## Inline Citation System
+
+**Briefing & Q&A**: Use research-paper style inline citations
+- Grok outputs text with `[tweetId]` markers
+- Example: `"RL reward should be in the environment [1997071224774517003]."`
+- Frontend converts `[tweetId]` → clickable `[↗]` link opening `https://x.com/i/status/{tweetId}`
+- No separate "References" section - citations are fully inline
+
+**Podcast Script**: Conversational, no inline citations
+- Opens with "Hey everyone, welcome back to Grokcast!"
+- References people by @handle naturally
+- Returns `relatedTweetIds` for "show notes" display
+- Hosted from Grok's perspective
 
 ---
 
@@ -150,6 +174,6 @@ FRONTEND_URL=http://localhost:5173
 ---
 
 ## Next Steps
-1. **Actions Routes** - `/api/topics/:id/briefing`, `/api/topics/:id/podcast`, `/api/topics/:id/qa`
-2. **Frontend** - React/Vite UI
+1. **Frontend** - React/Vite UI
+2. **Refresh** - Incremental classification for new posts
 3. **Polish** - Error handling, loading states, rate limit handling
