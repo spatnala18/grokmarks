@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { config, validateConfig } from './config';
+import authRoutes from './routes/auth';
+import { store } from './store/memory-store';
 
 // Validate environment variables
 validateConfig();
@@ -13,10 +16,18 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use(cookieParser());
+
+// Routes
+app.use('/auth', authRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    store: store.getStats(),
+  });
 });
 
 // Placeholder for future routes
@@ -31,6 +42,7 @@ app.get('/', (req, res) => {
         callback: 'GET /auth/callback',
         me: 'GET /auth/me',
         logout: 'POST /auth/logout',
+        status: 'GET /auth/status',
       },
     },
   });
