@@ -3,6 +3,8 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config, validateConfig } from './config';
 import authRoutes from './routes/auth';
+import xDataRoutes from './routes/x-data';
+import testRoutes from './routes/test';
 import { store } from './store/memory-store';
 
 // Validate environment variables
@@ -12,7 +14,7 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: config.frontendUrl,
+  origin: true, // Allow all origins for testing (will restrict in production)
   credentials: true,
 }));
 app.use(express.json());
@@ -20,6 +22,8 @@ app.use(cookieParser());
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/api/x', xDataRoutes);
+app.use('/test', testRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -30,7 +34,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Placeholder for future routes
+// API documentation
 app.get('/', (req, res) => {
   res.json({
     name: 'Grokmarks API',
@@ -43,6 +47,11 @@ app.get('/', (req, res) => {
         me: 'GET /auth/me',
         logout: 'POST /auth/logout',
         status: 'GET /auth/status',
+      },
+      xData: {
+        sync: 'POST /api/x/sync',
+        refresh: 'POST /api/x/refresh',
+        posts: 'GET /api/x/posts',
       },
     },
   });
