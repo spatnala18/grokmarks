@@ -123,4 +123,4 @@ MIT
 
 ---
 
-Built with ❤️ for the xAI Hackathon 2025
+Built for the xAI Hackathon 2025
