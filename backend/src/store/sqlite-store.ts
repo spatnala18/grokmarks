@@ -343,15 +343,36 @@ class SQLiteStore {
     }
   }
 
-  addPostsToTopicSpace(xUserId: string, topicSpaceId: string, postIds: string[]): void {
+  addPostsToTopicSpace(xUserId: string, topicSpaceId: string, postIds: string[], incrementNewCount: boolean = true): void {
     const ts = this.getTopicSpace(xUserId, topicSpaceId);
     if (ts) {
       const newPostIds = postIds.filter(id => !ts.bookmarkTweetIds.includes(id));
       ts.bookmarkTweetIds = [...ts.bookmarkTweetIds, ...newPostIds];
-      ts.newPostCount += newPostIds.length;
+      if (incrementNewCount) {
+        ts.newPostCount += newPostIds.length;
+      }
       ts.updatedAt = new Date().toISOString();
       this.saveTopicSpaces(xUserId, [ts]);
     }
+  }
+
+  removePostFromTopicSpace(xUserId: string, topicSpaceId: string, postId: string): boolean {
+    const ts = this.getTopicSpace(xUserId, topicSpaceId);
+    if (!ts) {
+      return false;
+    }
+    
+    const originalLength = ts.bookmarkTweetIds.length;
+    ts.bookmarkTweetIds = ts.bookmarkTweetIds.filter(id => id !== postId);
+    
+    if (ts.bookmarkTweetIds.length === originalLength) {
+      // Post was not in this topic
+      return false;
+    }
+    
+    ts.updatedAt = new Date().toISOString();
+    this.saveTopicSpaces(xUserId, [ts]);
+    return true;
   }
 
   clearTopicSpaces(xUserId: string): void {

@@ -9,13 +9,12 @@ const XAI_API_BASE = 'https://api.x.ai/v1';
 
 /**
  * Model selection strategy:
- * - Fast/cheap tasks (classification, summaries): grok-4-1-fast-non-reasoning → fallback grok-2
- * - Complex tasks (briefings, podcast, Q&A): grok-4-1-fast-reasoning → fallback grok-2
+ * - All tasks now use grok-4-1-fast-non-reasoning for speed
  */
 export const MODELS = {
   FAST: 'grok-4-1-fast-non-reasoning',      // For classification, per-tweet summaries
   FAST_FALLBACK: 'grok-2',
-  STRONG: 'grok-4-1-fast-reasoning',        // For briefings, podcast scripts, Q&A
+  STRONG: 'grok-4-1-fast-non-reasoning',    // For briefings, podcast scripts, Q&A (same as fast for speed)
   STRONG_FALLBACK: 'grok-2',
 };
 

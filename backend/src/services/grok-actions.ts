@@ -4,7 +4,7 @@
 // Briefing, Podcast Script, and Q&A actions for Topic Spaces
 
 import { v4 as uuidv4 } from 'uuid';
-import { grokStrong, parseJsonResponse, ChatMessage } from './grok';
+import { grokStrong, parseJsonResponse } from './grok';
 import { HYPERPARAMS } from '../config/hyperparams';
 import { Post, ActionResult, ActionType, PodcastSegment, SegmentedPodcastScript } from '../types';
 
@@ -301,75 +301,98 @@ ${postsText}`;
 }
 
 /**
+ * Frontend chat message type for multi-turn conversations
+ * (Different from the API ChatMessage which has system role)
+ */
+interface FrontendChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  groundedPostIds?: string[];
+}
+
+/**
  * Answer a question about a Topic Space - with inline citations
+ * Supports multi-turn chat by accepting conversation history
  */
 export async function answerQuestion(
   topicTitle: string,
   posts: Post[],
-  question: string
+  question: string,
+  chatHistory?: FrontendChatMessage[]
 ): Promise<ActionResult> {
   const postsText = formatPostsForPrompt(posts, 25);
   const validIds = getValidTweetIds(posts);
   
-  const systemPrompt = `You are answering a question based ONLY on the provided tweets. Be specific and substantive.
+  const systemPrompt = `You are a helpful AI assistant discussing the topic "${topicTitle}" based on the user's bookmarked tweets. Be conversational, specific and substantive.
 
-ANSWER STYLE:
+CONVERSATION STYLE:
 - Be direct and specific - don't hedge unnecessarily
 - Include names, claims, and concrete details from the tweets
 - If there are different viewpoints, lay them out clearly
 - Quote memorable phrases when relevant
 - If the tweets don't fully answer the question, say what they DO tell us
+- Remember previous messages in the conversation and build on them
+- Be conversational and natural - this is a multi-turn chat
 
 CITATION REQUIREMENTS:
 - Cite tweets inline using [tweetId] format
 - Place citations after claims: "The consensus is X [id1] [id2]."
 - ONLY use Tweet IDs from the provided list
 
-OUTPUT:
+OUTPUT (JSON format):
 {
-  "answer": "Substantive answer with specific details and [citations]",
+  "answer": "Your conversational response with [citations] where relevant",
   "citedTweetIds": ["id1", "id2", ...],
   "confidence": "high" | "medium" | "low"
 }
 
 Confidence guide:
 - high: Multiple tweets directly address the question
-- medium: Some relevant info but not comprehensive
-- low: Tangential mentions only`;
+- medium: Some relevant info but not comprehensive  
+- low: Tangential mentions only
 
-  const userPrompt = `Topic: "${topicTitle}"
-Question: "${question}"
-
-Answer based on these tweets:
-
+TWEETS FOR REFERENCE:
 ${postsText}`;
 
+  // Build messages array with history
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPrompt },
+  ];
+
+  // Add chat history if provided
+  if (chatHistory && chatHistory.length > 0) {
+    // Only include the last 10 messages to avoid token limits
+    const recentHistory = chatHistory.slice(-10);
+    for (const msg of recentHistory) {
+      messages.push({
+        role: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.content,
+      });
+    }
+  }
+
+  // Add the current question
+  messages.push({ role: 'user', content: question });
+
   try {
-    const response = await grokStrong(
-      [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      {
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
-      }
-    );
+    const response = await grokStrong(messages, {
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    });
 
     const parsed = parseJsonResponse<QAResponse>(response.content);
     
     // Validate cited IDs
     const validCitations = parsed.citedTweetIds.filter(id => validIds.has(id));
-    
-    const confidenceEmoji = parsed.confidence === 'high' ? '🟢' : parsed.confidence === 'medium' ? '🟡' : '🔴';
-    const output = `**Q: ${question}**\n\n${parsed.answer}\n\n${confidenceEmoji} Confidence: ${parsed.confidence}`;
 
     return {
       id: uuidv4(),
       topicSpaceId: '',
       actionType: 'qa',
       input: question,
-      output,
+      output: parsed.answer,
       createdAt: new Date().toISOString(),
       groundedPostIds: validCitations,
     };

@@ -241,10 +241,10 @@ export function RightPanel({
 
         {/* Trending Section */}
         {trending && (trending.hashtags.length > 0 || trending.mentions.length > 0 || trending.keywords.length > 0) && (
-          <div className="trending-section">
+          <div className="trending-section compact">
             <div className="section-header">
               <Sparkles size={14} />
-              <span>Trending in Bookmarks</span>
+              <span>Trending in Topic</span>
             </div>
             
             {/* Hashtags */}

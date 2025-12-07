@@ -81,6 +81,18 @@ export interface ActionResult {
   groundedPostIds: string[];
 }
 
+// ============================================
+// Chat Types
+// ============================================
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  groundedPostIds?: string[];
+}
+
 export interface AuthStatus {
   authenticated: boolean;
   user?: User;

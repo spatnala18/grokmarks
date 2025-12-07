@@ -2,7 +2,7 @@
 // Top Navigation Bar Component
 // ============================================
 
-import { RefreshCw, Search, LogOut } from 'lucide-react';
+import { Settings, LogOut, Sparkles } from 'lucide-react';
 import type { User } from '../types';
 import './TopNav.css';
 
@@ -19,20 +19,8 @@ export function TopNav({ user, isSyncing, onSync, onLogout }: TopNavProps) {
       {/* Left - Logo */}
       <div className="top-nav-left">
         <div className="logo">
-          <span className="logo-icon">🔖</span>
+          <Sparkles size={22} className="logo-icon" />
           <span className="logo-text">Grokmarks</span>
-        </div>
-      </div>
-
-      {/* Center - Search */}
-      <div className="top-nav-center">
-        <div className="search-box">
-          <Search size={18} className="search-icon" />
-          <input
-            type="text"
-            placeholder="Search topics, posts, or @handles…"
-            className="search-input"
-          />
         </div>
       </div>
 
@@ -41,12 +29,12 @@ export function TopNav({ user, isSyncing, onSync, onLogout }: TopNavProps) {
         {user && (
           <>
             <button
-              className="sync-button"
+              className="modify-topics-button"
               onClick={onSync}
               disabled={isSyncing}
             >
-              <RefreshCw size={16} className={isSyncing ? 'spinning' : ''} />
-              <span>{isSyncing ? 'Syncing…' : 'Sync from X'}</span>
+              <Settings size={16} className={isSyncing ? 'spinning' : ''} />
+              <span>{isSyncing ? 'Processing…' : 'Modify Topics'}</span>
             </button>
 
             <div className="user-info">

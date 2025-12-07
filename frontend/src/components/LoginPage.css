@@ -30,13 +30,17 @@
 }
 
 .login-logo-icon {
-  font-size: 36px;
+  color: #1d9bf0;
+  filter: drop-shadow(0 0 8px rgba(29, 155, 240, 0.4));
 }
 
 .login-logo-text {
   font-size: 28px;
   font-weight: 700;
-  color: var(--text-primary);
+  background: linear-gradient(135deg, #1d9bf0 0%, #1a8cd8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .login-title {

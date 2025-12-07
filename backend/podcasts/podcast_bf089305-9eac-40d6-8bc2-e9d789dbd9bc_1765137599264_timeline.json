@@ -1,0 +1,56 @@
+{
+  "totalDuration": 117.80025,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 12.25125,
+      "duration": 12.25125,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 12.25125,
+      "endTime": 43.0305,
+      "duration": 30.77925,
+      "tweetIds": [
+        "1995553798274912390",
+        "1996703357436940608",
+        "1997126533060903239"
+      ],
+      "themeTitle": "Inference Arms Race"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 43.0305,
+      "endTime": 71.96175,
+      "duration": 28.93125,
+      "tweetIds": [
+        "1995913105327751342",
+        "1995736070655492342",
+        "1996290275308638417"
+      ],
+      "themeTitle": "Smarts Beyond Tokens"
+    },
+    {
+      "segmentId": "theme_3",
+      "startTime": 71.96175,
+      "endTime": 103.965,
+      "duration": 32.00325,
+      "tweetIds": [
+        "1995353987806306804",
+        "1996191287293440013",
+        "1996250279033839918"
+      ],
+      "themeTitle": "Building the Backbone"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 103.965,
+      "endTime": 117.80025,
+      "duration": 13.83525,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T19:59:59.266Z"
+}

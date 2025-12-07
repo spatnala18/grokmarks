@@ -16,7 +16,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         {/* Logo & Branding */}
         <div className="login-header">
           <div className="login-logo">
-            <span className="login-logo-icon">🔖</span>
+            <Sparkles size={32} className="login-logo-icon" />
             <span className="login-logo-text">Grokmarks</span>
           </div>
           <h1 className="login-title">
@@ -54,7 +54,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               <Mic size={20} />
             </div>
             <div className="feature-text">
-              <h3>Grokcast Scripts</h3>
+              <h3>Audio Overview</h3>
               <p>Turn any topic into a podcast-style discussion</p>
             </div>
           </div>

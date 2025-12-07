@@ -165,13 +165,15 @@ class MemoryStore {
     }
   }
 
-  addPostsToTopicSpace(xUserId: string, topicSpaceId: string, postIds: string[]): void {
+  addPostsToTopicSpace(xUserId: string, topicSpaceId: string, postIds: string[], incrementNewCount: boolean = true): void {
     const data = this.userData.get(xUserId);
     const ts = data?.topicSpaces.get(topicSpaceId);
     if (ts) {
       const newPostIds = postIds.filter(id => !ts.bookmarkTweetIds.includes(id));
       ts.bookmarkTweetIds = [...ts.bookmarkTweetIds, ...newPostIds];
-      ts.newPostCount += newPostIds.length;
+      if (incrementNewCount) {
+        ts.newPostCount += newPostIds.length;
+      }
       ts.updatedAt = new Date().toISOString();
       
       // Update lastBookmarkTime if we have new posts
@@ -184,6 +186,25 @@ class MemoryStore {
         ts.lastBookmarkTime = new Date(maxTime).toISOString();
       }
     }
+  }
+
+  removePostFromTopicSpace(xUserId: string, topicSpaceId: string, postId: string): boolean {
+    const data = this.userData.get(xUserId);
+    const ts = data?.topicSpaces.get(topicSpaceId);
+    if (!ts) {
+      return false;
+    }
+    
+    const originalLength = ts.bookmarkTweetIds.length;
+    ts.bookmarkTweetIds = ts.bookmarkTweetIds.filter(id => id !== postId);
+    
+    if (ts.bookmarkTweetIds.length === originalLength) {
+      // Post was not in this topic
+      return false;
+    }
+    
+    ts.updatedAt = new Date().toISOString();
+    return true;
   }
 
   clearTopicSpaces(xUserId: string): void {

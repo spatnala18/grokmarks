@@ -1,0 +1,44 @@
+{
+  "totalDuration": 61.821,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 9.13125,
+      "duration": 9.13125,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 9.13125,
+      "endTime": 32.3985,
+      "duration": 23.26725,
+      "tweetIds": [
+        "1995553798274912390",
+        "1996269783512183156",
+        "1996621856447909990"
+      ],
+      "themeTitle": "Inference Arms Race"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 32.3985,
+      "endTime": 52.497749999999996,
+      "duration": 20.09925,
+      "tweetIds": [
+        "1995736070655492342",
+        "1995913105327751342",
+        "1996191287293440013"
+      ],
+      "themeTitle": "Cracking LLM Minds"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 52.497749999999996,
+      "endTime": 61.821,
+      "duration": 9.32325,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T19:49:07.263Z"
+}

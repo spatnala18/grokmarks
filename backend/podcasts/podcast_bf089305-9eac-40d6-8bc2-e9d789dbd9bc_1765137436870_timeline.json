@@ -1,0 +1,44 @@
+{
+  "totalDuration": 60.477000000000004,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 10.30725,
+      "duration": 10.30725,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 10.30725,
+      "endTime": 28.7745,
+      "duration": 18.46725,
+      "tweetIds": [
+        "1995553798274912390",
+        "1996269783512183156",
+        "1996621856447909990"
+      ],
+      "themeTitle": "Inference Turbo Mode"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 28.7745,
+      "endTime": 50.72175,
+      "duration": 21.94725,
+      "tweetIds": [
+        "1995353987806306804",
+        "1995736070655492342",
+        "1995913105327751342"
+      ],
+      "themeTitle": "Cracking the Black Box"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 50.72175,
+      "endTime": 60.477000000000004,
+      "duration": 9.75525,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T19:57:16.871Z"
+}

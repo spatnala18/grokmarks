@@ -38,7 +38,8 @@ export interface Store {
   getTopicSpace(xUserId: string, topicSpaceId: string): TopicSpace | undefined;
   getAllTopicSpaces(xUserId: string): TopicSpace[];
   updateTopicSpace(xUserId: string, topicSpaceId: string, updates: Partial<TopicSpace>): void;
-  addPostsToTopicSpace(xUserId: string, topicSpaceId: string, postIds: string[]): void;
+  addPostsToTopicSpace(xUserId: string, topicSpaceId: string, postIds: string[], incrementNewCount?: boolean): void;
+  removePostFromTopicSpace(xUserId: string, topicSpaceId: string, postId: string): boolean;
   clearTopicSpaces(xUserId: string): void;
 
   // Action Results Management

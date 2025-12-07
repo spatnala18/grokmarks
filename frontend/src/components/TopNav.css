@@ -21,17 +21,21 @@
 .logo {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .logo-icon {
-  font-size: 24px;
+  color: var(--accent-primary);
+  filter: drop-shadow(0 0 4px rgba(29, 161, 242, 0.4));
 }
 
 .logo-text {
   font-size: 20px;
   font-weight: 700;
-  color: var(--text-primary);
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #8B5CF6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Center section */
@@ -84,28 +88,31 @@
   justify-content: flex-end;
 }
 
-.sync-button {
+.modify-topics-button {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--accent-primary);
-  color: white;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
   padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: 600;
-  transition: background 0.2s;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
 }
 
-.sync-button:hover:not(:disabled) {
-  background: var(--accent-hover);
+.modify-topics-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 
-.sync-button:disabled {
+.modify-topics-button:disabled {
   opacity: 0.7;
 }
 
-.sync-button .spinning {
+.modify-topics-button .spinning {
   animation: spin 1s linear infinite;
 }
 

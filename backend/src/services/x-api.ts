@@ -222,6 +222,70 @@ export async function getBookmarks(
 }
 
 /**
+ * Single tweet response from X API
+ */
+interface XSingleTweetResponse {
+  data?: XTweet;
+  includes?: {
+    users?: XUser[];
+  };
+  errors?: XApiError[];
+}
+
+/**
+ * Fetch a single tweet by ID
+ * 
+ * @param tweetId - The tweet ID to fetch
+ * @param accessToken - OAuth 2.0 access token
+ * @param source - The source to assign to the post (default: 'bookmark')
+ */
+export async function getTweetById(
+  tweetId: string,
+  accessToken: string,
+  source: PostSource = 'bookmark'
+): Promise<{ post: Post; rateLimitInfo?: RateLimitInfo }> {
+  try {
+    const params: Record<string, string> = {
+      'tweet.fields': TWEET_FIELDS,
+      'user.fields': USER_FIELDS,
+      'expansions': EXPANSIONS,
+    };
+
+    const response = await axios.get<XSingleTweetResponse>(
+      `${X_API_BASE}/tweets/${tweetId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        params,
+      }
+    );
+
+    const data = response.data;
+
+    if (!data.data) {
+      throw new Error('Tweet not found');
+    }
+
+    const userMap = buildUserMap(data.includes?.users);
+    const post = convertToPost(data.data, userMap, source);
+
+    return {
+      post,
+      rateLimitInfo: extractRateLimitInfo(response.headers),
+    };
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response?.status === 404) {
+        throw new Error('Tweet not found or is not accessible');
+      }
+      handleXApiError(error);
+    }
+    throw error;
+  }
+}
+
+/**
  * Fetch user's home timeline (reverse chronological)
  * 
  * @param userId - X user ID

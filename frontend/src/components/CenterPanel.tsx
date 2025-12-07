@@ -1,6 +1,6 @@
 // ============================================
 // Center Panel - Three-Tab Topic View
-// Tabs: Overview | Research | Grokcast
+// Tabs: Overview | Chat | Grokcast
 // ============================================
 
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
@@ -16,13 +16,14 @@ import {
   Headphones,
   X,
   FileText,
-  Search,
-  Mic,
-  RefreshCw,
-  Volume2,
+  RotateCcw,
+  Plus,
+  MoreHorizontal,
+  ArrowRight,
 } from 'lucide-react';
-import type { TopicSpaceWithPosts, Post, ActionResult, TimelineEntry, SegmentedPodcastScript, PodcastAudio } from '../types';
+import type { TopicSpaceWithPosts, Post, ActionResult, TimelineEntry, SegmentedPodcastScript, PodcastAudio, ChatMessage, TopicSpace } from '../types';
 import { parseCitations } from '../utils';
+import { GrokBrand } from './GrokBrand';
 import './CenterPanel.css';
 
 // Helper to get full URL
@@ -31,8 +32,8 @@ const getFullUrl = (path: string): string => {
   return `http://localhost:8000${path}`;
 };
 
-// Tab types (3 tabs: Overview, Research, Grokcast)
-type TabId = 'overview' | 'research' | 'grokcast';
+// Tab types (3 tabs: Overview, Chat, Grokcast)
+type TabId = 'overview' | 'chat' | 'grokcast';
 
 interface Tab {
   id: TabId;
@@ -42,40 +43,45 @@ interface Tab {
 
 const TABS: Tab[] = [
   { id: 'overview', label: 'Overview', icon: <FileText size={16} /> },
-  { id: 'research', label: 'Research', icon: <Search size={16} /> },
-  { id: 'grokcast', label: 'Grokcast', icon: <Mic size={16} /> },
+  { id: 'chat', label: 'Chat', icon: <MessageCircle size={16} /> },
+  { id: 'grokcast', label: 'Audio Overview', icon: <Headphones size={16} /> },
 ];
 
 interface CenterPanelProps {
   topic: TopicSpaceWithPosts | null;
-  qaHistory: ActionResult[];
   briefing: ActionResult | null;
   isLoadingTopic: boolean;
   isAskingQuestion: boolean;
   isGeneratingBriefing: boolean;
-  onAskQuestion: (question: string) => void;
+  onAskQuestion: (question: string, chatHistory: ChatMessage[]) => void;
   onGenerateBriefing: () => void;
   highlightedTweetIds?: string[];
   grokcastMode?: boolean;
   currentSegment?: TimelineEntry | null;
   segmentedScript?: SegmentedPodcastScript | null;
   onExitGrokcast?: () => void;
+  // Chat props
+  chatMessages: ChatMessage[];
+  onClearChat: () => void;
   // Podcast/Grokcast props
-  podcast?: ActionResult | null;
   podcastAudio?: PodcastAudio | null;
   isGeneratingPodcast?: boolean;
   isGeneratingPodcastAudio?: boolean;
   onGeneratePodcast?: () => void;
-  onGeneratePodcastAudio?: () => void;
   onHighlightTweets?: (tweetIds: string[]) => void;
   onSegmentChange?: (segment: TimelineEntry | null) => void;
   onGrokcastStart?: () => void;
   onGrokcastEnd?: () => void;
+  // Tweet management props
+  allTopics?: TopicSpace[];
+  onAddTweet?: (tweetUrl: string) => Promise<void>;
+  onMoveTweet?: (postId: string, toTopicId: string) => Promise<void>;
+  isAddingTweet?: boolean;
+  isMovingTweet?: boolean;
 }
 
 export function CenterPanel({ 
   topic, 
-  qaHistory, 
   briefing,
   isLoadingTopic, 
   isAskingQuestion,
@@ -87,21 +93,45 @@ export function CenterPanel({
   currentSegment = null,
   segmentedScript = null,
   onExitGrokcast,
+  // Chat props
+  chatMessages,
+  onClearChat,
   // Podcast/Grokcast props
-  podcast = null,
   podcastAudio = null,
   isGeneratingPodcast = false,
   isGeneratingPodcastAudio = false,
   onGeneratePodcast,
-  onGeneratePodcastAudio,
   onHighlightTweets,
   onSegmentChange,
   onGrokcastStart,
   onGrokcastEnd,
+  // Tweet management props
+  allTopics = [],
+  onAddTweet,
+  onMoveTweet,
+  isAddingTweet = false,
+  isMovingTweet = false,
 }: CenterPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showPosts, setShowPosts] = useState(false);
   const [question, setQuestion] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [showAddTweetModal, setShowAddTweetModal] = useState(false);
+  const [addTweetUrl, setAddTweetUrl] = useState('');
+
+  // Auto-scroll chat to bottom when new messages arrive
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages]);
+
+  // Auto-generate briefing when topic is selected for the first time
+  useEffect(() => {
+    if (topic && !briefing && !isGeneratingBriefing) {
+      onGenerateBriefing();
+    }
+  }, [topic?.id]); // Only trigger when topic ID changes
 
   // Get tweets for the current segment during grokcast mode
   const segmentTweets = useMemo(() => {
@@ -120,9 +150,15 @@ export function CenterPanel({
     return segmentedScript.segments.find(s => s.segmentId === currentSegment.segmentId);
   }, [segmentedScript, currentSegment]);
 
+  // Get other topics for move functionality
+  const otherTopics = useMemo(() => {
+    if (!topic || !allTopics) return [];
+    return allTopics.filter(t => t.id !== topic.id);
+  }, [topic, allTopics]);
+
   const handleSubmitQuestion = () => {
     if (question.trim() && !isAskingQuestion) {
-      onAskQuestion(question.trim());
+      onAskQuestion(question.trim(), chatMessages);
       setQuestion('');
     }
   };
@@ -131,6 +167,14 @@ export function CenterPanel({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmitQuestion();
+    }
+  };
+
+  const handleAddTweet = async () => {
+    if (addTweetUrl.trim() && onAddTweet) {
+      await onAddTweet(addTweetUrl.trim());
+      setAddTweetUrl('');
+      setShowAddTweetModal(false);
     }
   };
 
@@ -164,13 +208,6 @@ export function CenterPanel({
 
   // Get unique authors from posts
   const uniqueAuthors = [...new Map(topic.posts.map(p => [p.authorUsername, p])).values()].slice(0, 5);
-  
-  // Extract bullet points from description
-  const descriptionBullets = topic.description
-    .split(/[.!?]/)
-    .filter(s => s.trim().length > 20)
-    .slice(0, 4)
-    .map(s => s.trim());
 
   return (
     <main className="center-panel">
@@ -208,31 +245,86 @@ export function CenterPanel({
         </div>
       </div>
 
+      {/* Add Tweet Modal */}
+      {showAddTweetModal && (
+        <div className="modal-overlay" onClick={() => setShowAddTweetModal(false)}>
+          <div className="modal add-tweet-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Add Tweet</h3>
+              <button className="modal-close" onClick={() => setShowAddTweetModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-content">
+              <label htmlFor="tweet-url">Paste X/Twitter URL or Tweet ID</label>
+              <input
+                id="tweet-url"
+                type="text"
+                placeholder="https://x.com/user/status/123..."
+                value={addTweetUrl}
+                onChange={(e) => setAddTweetUrl(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTweet()}
+                autoFocus
+              />
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn-secondary" 
+                onClick={() => setShowAddTweetModal(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={handleAddTweet}
+                disabled={!addTweetUrl.trim() || isAddingTweet}
+              >
+                {isAddingTweet ? (
+                  <>
+                    <div className="spinner-small" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <Plus size={16} />
+                    Add to Topic
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tab Content */}
       <div className="center-content">
         {effectiveTab === 'overview' && (
           <OverviewTab
             topic={topic}
             uniqueAuthors={uniqueAuthors}
-            descriptionBullets={descriptionBullets}
             showPosts={showPosts}
             setShowPosts={setShowPosts}
             highlightedTweetIds={highlightedTweetIds}
+            briefing={briefing}
+            isGeneratingBriefing={isGeneratingBriefing}
+            onShowAddTweetModal={() => setShowAddTweetModal(true)}
+            otherTopics={otherTopics}
+            onMoveTweet={onMoveTweet}
+            isMovingTweet={isMovingTweet}
           />
         )}
 
-        {effectiveTab === 'research' && (
-          <ResearchTab
+        {effectiveTab === 'chat' && (
+          <ChatTab
             topic={topic}
-            briefing={briefing}
-            qaHistory={qaHistory}
+            chatMessages={chatMessages}
             isAskingQuestion={isAskingQuestion}
-            isGeneratingBriefing={isGeneratingBriefing}
             question={question}
             setQuestion={setQuestion}
             handleSubmitQuestion={handleSubmitQuestion}
             handleKeyDown={handleKeyDown}
-            onGenerateBriefing={onGenerateBriefing}
+            onClearChat={onClearChat}
+            chatEndRef={chatEndRef}
           />
         )}
 
@@ -244,12 +336,10 @@ export function CenterPanel({
             currentScriptSegment={currentScriptSegment}
             segmentTweets={segmentTweets}
             segmentedScript={segmentedScript}
-            podcast={podcast}
             podcastAudio={podcastAudio}
             isGeneratingPodcast={isGeneratingPodcast}
             isGeneratingPodcastAudio={isGeneratingPodcastAudio}
             onGeneratePodcast={onGeneratePodcast}
-            onGeneratePodcastAudio={onGeneratePodcastAudio}
             onHighlightTweets={onHighlightTweets}
             onSegmentChange={onSegmentChange}
             onGrokcastStart={onGrokcastStart}
@@ -268,20 +358,55 @@ export function CenterPanel({
 interface OverviewTabProps {
   topic: TopicSpaceWithPosts;
   uniqueAuthors: Post[];
-  descriptionBullets: string[];
   showPosts: boolean;
   setShowPosts: (show: boolean) => void;
   highlightedTweetIds: string[];
+  briefing: ActionResult | null;
+  isGeneratingBriefing: boolean;
+  onShowAddTweetModal: () => void;
+  otherTopics: TopicSpace[];
+  onMoveTweet?: (postId: string, toTopicId: string) => Promise<void>;
+  isMovingTweet?: boolean;
 }
 
 function OverviewTab({
   topic,
   uniqueAuthors,
-  descriptionBullets,
   showPosts,
   setShowPosts,
   highlightedTweetIds,
+  briefing,
+  isGeneratingBriefing,
+  onShowAddTweetModal,
+  otherTopics,
+  onMoveTweet,
+  isMovingTweet = false,
 }: OverviewTabProps) {
+  // Check if topic is empty (no tweets)
+  const isEmpty = topic.posts.length === 0;
+
+  // If empty, show empty state UI
+  if (isEmpty) {
+    return (
+      <div className="tab-content overview-tab empty-topic">
+        <div className="empty-topic-content">
+          <div className="empty-topic-icon">
+            <Bookmark size={48} />
+          </div>
+          <h3>No tweets in this topic yet</h3>
+          <p>Add tweets to this topic by pasting their X/Twitter URL</p>
+          <button 
+            className="add-tweet-btn-large"
+            onClick={onShowAddTweetModal}
+          >
+            <Plus size={20} />
+            Add Your First Tweet
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tab-content overview-tab">
       {/* Contributors */}
@@ -300,26 +425,55 @@ function OverviewTab({
         ))}
       </div>
 
-      {/* Topic Overview Card */}
-      <div className="card topic-overview">
-        <h3 className="card-title">
-          <Sparkles size={18} />
-          About this topic
-        </h3>
-        <ul className="overview-bullets">
-          {descriptionBullets.map((bullet, i) => (
-            <li key={i}>{bullet}</li>
-          ))}
-        </ul>
+      {/* AI-Generated Briefing */}
+      <div className="card briefing-card overview-briefing">
+        <div className="card-header">
+          <h3 className="card-title">
+            <FileText size={18} />
+            AI Summary
+          </h3>
+          <GrokBrand variant="created-with" size="small" />
+        </div>
 
-        {/* Collapsible Posts Section */}
-        <button 
-          className="posts-toggle"
-          onClick={() => setShowPosts(!showPosts)}
-        >
-          {showPosts ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          <span>Bookmarked posts ({topic.posts.length})</span>
-        </button>
+        {isGeneratingBriefing ? (
+          <div className="briefing-generating">
+            <div className="spinner" />
+            <span>Generating summary...</span>
+          </div>
+        ) : briefing ? (
+          <div 
+            className="briefing-content"
+            dangerouslySetInnerHTML={{ __html: parseCitations(briefing.output) }}
+          />
+        ) : (
+          <div className="briefing-empty">
+            <p>Loading summary...</p>
+          </div>
+        )}
+      </div>
+
+      {/* Bookmarked Posts */}
+      <div className="card topic-posts">
+        <div className="posts-header">
+          <button 
+            className="posts-toggle"
+            onClick={() => setShowPosts(!showPosts)}
+          >
+            {showPosts ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>
+              <Bookmark size={14} />
+              Tweets in topic ({topic.posts.length})
+            </span>
+          </button>
+          <button 
+            className="add-tweet-btn"
+            onClick={onShowAddTweetModal}
+            title="Add tweet by URL"
+          >
+            <Plus size={16} />
+            Add Tweet
+          </button>
+        </div>
 
         {showPosts && (
           <div className="posts-list">
@@ -328,6 +482,9 @@ function OverviewTab({
                 key={post.id} 
                 post={post} 
                 isHighlighted={highlightedTweetIds.includes(post.id)}
+                otherTopics={otherTopics}
+                onMoveTweet={onMoveTweet}
+                isMovingTweet={isMovingTweet}
               />
             ))}
           </div>
@@ -338,129 +495,147 @@ function OverviewTab({
 }
 
 // ============================================
-// RESEARCH TAB
+// CHAT TAB - Multi-turn conversation with Grok
 // ============================================
-interface ResearchTabProps {
+interface ChatTabProps {
   topic: TopicSpaceWithPosts;
-  briefing: ActionResult | null;
-  qaHistory: ActionResult[];
+  chatMessages: ChatMessage[];
   isAskingQuestion: boolean;
-  isGeneratingBriefing: boolean;
   question: string;
   setQuestion: (q: string) => void;
   handleSubmitQuestion: () => void;
   handleKeyDown: (e: React.KeyboardEvent) => void;
-  onGenerateBriefing: () => void;
+  onClearChat: () => void;
+  chatEndRef: React.RefObject<HTMLDivElement | null>;
 }
 
-function ResearchTab({
-  briefing,
-  qaHistory,
+function ChatTab({
+  topic,
+  chatMessages,
   isAskingQuestion,
-  isGeneratingBriefing,
   question,
   setQuestion,
   handleSubmitQuestion,
   handleKeyDown,
-  onGenerateBriefing,
-}: ResearchTabProps) {
+  onClearChat,
+  chatEndRef,
+}: ChatTabProps) {
   return (
-    <div className="tab-content research-tab">
-      {/* Briefing Section */}
-      <div className="card briefing-card">
-        <div className="card-header">
-          <h3 className="card-title">
-            <FileText size={18} />
-            Research Briefing
-          </h3>
-          <button
-            className="generate-button"
-            onClick={onGenerateBriefing}
-            disabled={isGeneratingBriefing}
-          >
-            {isGeneratingBriefing ? (
-              <>
-                <div className="spinner-small" />
-                Generating...
-              </>
-            ) : briefing ? (
-              <>
-                <RefreshCw size={14} />
-                Regenerate
-              </>
-            ) : (
-              <>
-                <Sparkles size={14} />
-                Generate
-              </>
-            )}
-          </button>
+    <div className="tab-content chat-tab">
+      {/* Chat Header */}
+      <div className="chat-header">
+        <div className="chat-header-left">
+          <GrokBrand variant="powered-by" size="small" />
         </div>
-
-        {briefing ? (
-          <div 
-            className="briefing-content"
-            dangerouslySetInnerHTML={{ __html: parseCitations(briefing.output) }}
-          />
-        ) : (
-          <div className="briefing-empty">
-            <p>Generate a research-style briefing from your bookmarked posts about this topic.</p>
-          </div>
+        {chatMessages.length > 0 && (
+          <button className="new-chat-button" onClick={onClearChat}>
+            <RotateCcw size={14} />
+            New Chat
+          </button>
         )}
       </div>
 
-      {/* Ask Grok Section */}
-      <div className="card ask-grok">
-        <h3 className="card-title">
-          <MessageCircle size={18} />
-          Ask Grok about this topic
-        </h3>
-
-        {/* Q&A History */}
-        {qaHistory.length > 0 && (
-          <div className="qa-history">
-            {qaHistory.map((qa) => (
-              <div key={qa.id} className="qa-item fade-in">
-                <div className="qa-question">
-                  <span className="qa-label">Q:</span>
-                  {qa.input}
+      {/* Chat Messages */}
+      <div className="chat-messages">
+        {chatMessages.length === 0 ? (
+          <div className="chat-empty">
+            <MessageCircle size={48} className="chat-empty-icon" />
+            <h3>Chat with Grok about "{topic.title}"</h3>
+            <p>Ask questions about your bookmarked posts on this topic. Grok will answer based on your saved content.</p>
+            <div className="chat-suggestions">
+              <button 
+                className="chat-suggestion"
+                onClick={() => setQuestion("What are the main themes in these posts?")}
+              >
+                What are the main themes?
+              </button>
+              <button 
+                className="chat-suggestion"
+                onClick={() => setQuestion("Who are the key people mentioned?")}
+              >
+                Who are the key people?
+              </button>
+              <button 
+                className="chat-suggestion"
+                onClick={() => setQuestion("What are the different viewpoints?")}
+              >
+                What are the different viewpoints?
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {chatMessages.map((msg) => (
+              <div 
+                key={msg.id} 
+                className={`chat-message ${msg.role === 'user' ? 'user-message' : 'assistant-message'}`}
+              >
+                {msg.role === 'assistant' && (
+                  <div className="message-avatar">
+                    <img 
+                      src="/assets/xai-grok/Grok_Logomark_Light.svg" 
+                      alt="Grok" 
+                      className="grok-avatar"
+                    />
+                  </div>
+                )}
+                <div className="message-content">
+                  <div 
+                    className="message-text"
+                    dangerouslySetInnerHTML={{ 
+                      __html: msg.role === 'assistant' 
+                        ? parseCitations(msg.content) 
+                        : msg.content 
+                    }}
+                  />
                 </div>
-                <div 
-                  className="qa-answer"
-                  dangerouslySetInnerHTML={{ __html: parseCitations(qa.output) }}
-                />
               </div>
             ))}
-          </div>
+            
+            {/* Thinking indicator */}
+            {isAskingQuestion && (
+              <div className="chat-message assistant-message thinking">
+                <div className="message-avatar">
+                  <img 
+                    src="/assets/xai-grok/Grok_Logomark_Light.svg" 
+                    alt="Grok" 
+                    className="grok-avatar"
+                  />
+                </div>
+                <div className="message-content">
+                  <div className="message-role">Grok</div>
+                  <div className="thinking-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div ref={chatEndRef} />
+          </>
         )}
+      </div>
 
-        {/* Thinking indicator */}
-        {isAskingQuestion && (
-          <div className="qa-thinking">
-            <div className="spinner" />
-            <span>Grok is thinking…</span>
-          </div>
-        )}
-
-        {/* Question Input */}
-        <div className="question-input-wrapper">
-          <input
-            type="text"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask a question about this topic…"
-            className="question-input"
-            disabled={isAskingQuestion}
-          />
-          <button
-            className="question-submit"
-            onClick={handleSubmitQuestion}
-            disabled={!question.trim() || isAskingQuestion}
-          >
-            <Send size={18} />
-          </button>
-        </div>
+      {/* Chat Input */}
+      <div className="chat-input-wrapper">
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Message Grok..."
+          className="chat-input"
+          disabled={isAskingQuestion}
+        />
+        <button
+          className="chat-submit"
+          onClick={handleSubmitQuestion}
+          disabled={!question.trim() || isAskingQuestion}
+        >
+          <Send size={18} />
+        </button>
       </div>
     </div>
   );
@@ -476,12 +651,10 @@ interface GrokcastTabProps {
   currentScriptSegment: any;
   segmentTweets: Post[];
   segmentedScript: SegmentedPodcastScript | null;
-  podcast?: ActionResult | null;
   podcastAudio?: PodcastAudio | null;
   isGeneratingPodcast?: boolean;
   isGeneratingPodcastAudio?: boolean;
   onGeneratePodcast?: () => void;
-  onGeneratePodcastAudio?: () => void;
   onHighlightTweets?: (tweetIds: string[]) => void;
   onSegmentChange?: (segment: TimelineEntry | null) => void;
   onGrokcastStart?: () => void;
@@ -496,12 +669,10 @@ function GrokcastTab({
   currentScriptSegment,
   segmentTweets,
   segmentedScript,
-  podcast,
   podcastAudio,
   isGeneratingPodcast = false,
   isGeneratingPodcastAudio = false,
   onGeneratePodcast,
-  onGeneratePodcastAudio,
   onHighlightTweets,
   onSegmentChange,
   onGrokcastStart,
@@ -609,6 +780,7 @@ function GrokcastTab({
         <div className="grokcast-player-section">
           <GrokcastAudioPlayer
             podcastAudio={podcastAudio}
+            segmentedScript={segmentedScript}
             onHighlightTweets={onHighlightTweets || (() => {})}
             onSegmentChange={onSegmentChange || (() => {})}
             onGrokcastStart={onGrokcastStart || (() => {})}
@@ -624,94 +796,59 @@ function GrokcastTab({
     <div className="tab-content grokcast-tab">
       <div className="grokcast-generation-ui">
         <div className="grokcast-hero">
-          <Headphones size={64} className="grokcast-hero-icon" />
+          <div className="grokcast-hero-icon-wrapper">
+            <Headphones size={48} className="grokcast-hero-icon" />
+          </div>
           <h2>Grokcast</h2>
           <p className="grokcast-hero-description">
-            Generate an AI-powered podcast about "{topic.title}" based on your bookmarked posts.
+            Generate an AI-powered podcast about "{topic.title}" based on tweets in the topic.
             The audio will sync with your tweets as it plays.
           </p>
+          <GrokBrand variant="powered-by-voice" size="medium" />
         </div>
 
-        {/* Generation Steps */}
-        <div className="grokcast-steps">
-          {/* Step 1: Generate Script */}
-          <div className={`grokcast-step ${podcast ? 'completed' : ''} ${isGeneratingPodcast ? 'loading' : ''}`}>
-            <div className="step-number">1</div>
-            <div className="step-content">
-              <h3>Generate Script</h3>
-              <p>Create an engaging podcast script from your bookmarks</p>
-              {podcast ? (
-                <div className="step-status success">
-                  <Sparkles size={14} />
-                  Script ready
-                </div>
+        {/* Single Generate Button */}
+        {!podcastAudio ? (
+          <div className="grokcast-generate-section">
+            <button
+              className="grokcast-generate-btn"
+              onClick={onGeneratePodcast}
+              disabled={isGeneratingPodcast || isGeneratingPodcastAudio}
+            >
+              {isGeneratingPodcast ? (
+                <>
+                  <div className="spinner-grokcast" />
+                  <span>Generating script...</span>
+                </>
+              ) : isGeneratingPodcastAudio ? (
+                <>
+                  <div className="spinner-grokcast" />
+                  <span>Generating audio...</span>
+                </>
               ) : (
-                <button
-                  className="generate-button"
-                  onClick={onGeneratePodcast}
-                  disabled={isGeneratingPodcast}
-                >
-                  {isGeneratingPodcast ? (
-                    <>
-                      <div className="spinner-small" />
-                      Generating script...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={14} />
-                      Generate Script
-                    </>
-                  )}
-                </button>
+                <>
+                  <Sparkles size={20} />
+                  <span>Generate Audio Overview</span>
+                </>
               )}
-            </div>
+            </button>
+            <p className="grokcast-generate-hint">
+              This will take about 30-60 seconds to generate
+            </p>
           </div>
-
-          {/* Step 2: Generate Audio */}
-          <div className={`grokcast-step ${podcastAudio ? 'completed' : ''} ${isGeneratingPodcastAudio ? 'loading' : ''} ${!podcast ? 'disabled' : ''}`}>
-            <div className="step-number">2</div>
-            <div className="step-content">
-              <h3>Generate Audio</h3>
-              <p>Convert the script to speech with xAI TTS</p>
-              {podcastAudio ? (
-                <div className="step-status success">
-                  <Volume2 size={14} />
-                  Audio ready ({Math.floor(podcastAudio.duration / 60)}:{String(Math.floor(podcastAudio.duration % 60)).padStart(2, '0')})
-                </div>
-              ) : (
-                <button
-                  className="generate-button"
-                  onClick={onGeneratePodcastAudio}
-                  disabled={!podcast || isGeneratingPodcastAudio}
-                >
-                  {isGeneratingPodcastAudio ? (
-                    <>
-                      <div className="spinner-small" />
-                      Generating audio...
-                    </>
-                  ) : (
-                    <>
-                      <Mic size={14} />
-                      Generate Audio
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Audio Player - Show when audio is ready */}
-        {podcastAudio && onHighlightTweets && onSegmentChange && onGrokcastStart && onGrokcastEnd && (
-          <div className="grokcast-player-ready">
-            <h3>🎧 Ready to Play</h3>
-            <p>Press play to start the Grokcast. Tweets will highlight as they're discussed.</p>
+        ) : (
+          /* Audio Player Ready - Compact layout with inline tweet sync */
+          <div className="grokcast-player-ready-compact">
+            {/* Compact Player with integrated tweet display */}
             <GrokcastAudioPlayer
               podcastAudio={podcastAudio}
-              onHighlightTweets={onHighlightTweets}
-              onSegmentChange={onSegmentChange}
-              onGrokcastStart={onGrokcastStart}
-              onGrokcastEnd={onGrokcastEnd}
+              segmentedScript={segmentedScript}
+              onHighlightTweets={onHighlightTweets || (() => {})}
+              onSegmentChange={onSegmentChange || (() => {})}
+              onGrokcastStart={onGrokcastStart || (() => {})}
+              onGrokcastEnd={onGrokcastEnd || (() => {})}
+              showInlineTweets={true}
+              topic={topic}
             />
           </div>
         )}
@@ -725,21 +862,28 @@ function GrokcastTab({
 // ============================================
 interface GrokcastAudioPlayerProps {
   podcastAudio: PodcastAudio;
+  segmentedScript?: SegmentedPodcastScript | null;
   onHighlightTweets: (tweetIds: string[]) => void;
   onSegmentChange: (segment: TimelineEntry | null) => void;
   onGrokcastStart: () => void;
   onGrokcastEnd: () => void;
+  showInlineTweets?: boolean;
+  topic?: TopicSpaceWithPosts;
 }
 
 function GrokcastAudioPlayer({ 
   podcastAudio, 
+  segmentedScript,
   onHighlightTweets,
   onSegmentChange,
   onGrokcastStart,
   onGrokcastEnd,
+  showInlineTweets = false,
+  topic,
 }: GrokcastAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const currentSegmentIdRef = useRef<string | null>(null);
+  const [currentSegmentState, setCurrentSegmentState] = useState<TimelineEntry | null>(null);
   
   // Find the current segment based on audio time
   const findCurrentSegment = useCallback((currentTime: number): TimelineEntry | null => {
@@ -772,6 +916,7 @@ function GrokcastAudioPlayer({
     // Only update if segment changed
     if (newSegmentId !== currentSegmentIdRef.current) {
       currentSegmentIdRef.current = newSegmentId;
+      setCurrentSegmentState(segment);
       // Segment changed - update parent
       if (segment) {
         onHighlightTweets(segment.tweetIds);
@@ -782,6 +927,15 @@ function GrokcastAudioPlayer({
       }
     }
   }, [findCurrentSegment, onHighlightTweets, onSegmentChange]);
+
+  // Get current tweets for inline display
+  const inlineTweets = useMemo(() => {
+    if (!showInlineTweets || !topic || !currentSegmentState) return [];
+    const tweetIds = currentSegmentState.tweetIds.slice(0, 2); // Max 2 tweets inline
+    return tweetIds
+      .map(id => topic.posts.find(p => p.id === id))
+      .filter((p): p is Post => !!p);
+  }, [showInlineTweets, topic, currentSegmentState]);
   
   // Handle play/pause events
   const handlePlay = useCallback(() => {
@@ -810,38 +964,59 @@ function GrokcastAudioPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [podcastAudio.podcastUrl]);
   
-  const hasTimeline = podcastAudio.timeline && podcastAudio.timeline.entries.length > 0;
-  
   return (
-    <div className="podcast-audio-player">
-      <div className="audio-player-header">
-        <Volume2 size={14} />
-        <span>🎧 Audio Ready</span>
-        <span className="audio-duration">
-          {Math.floor(podcastAudio.duration / 60)}:{String(Math.floor(podcastAudio.duration % 60)).padStart(2, '0')}
-        </span>
-      </div>
-      
-      <audio 
-        ref={audioRef}
-        controls 
-        className="podcast-audio-element"
-        src={getFullUrl(podcastAudio.podcastUrl)}
-        onTimeUpdate={handleTimeUpdate}
-        onPlay={handlePlay}
-        onPause={handlePause}
-        onEnded={handleEnded}
-      >
-        Your browser does not support the audio element.
-      </audio>
-      
-      <div className="audio-meta">
-        <span className="audio-voice">Voice: {podcastAudio.voice}</span>
-        {hasTimeline && (
-          <span className="audio-sync-badge">
-            🔗 Tweet sync enabled
-          </span>
-        )}
+    <div className="podcast-player-container">
+      {/* Inline Tweet Display - Shows currently discussed tweets */}
+      {showInlineTweets && (
+        <div className="inline-tweet-sync">
+          {inlineTweets.length > 0 ? (
+            <>
+              <div className="inline-sync-header">
+                <Sparkles size={12} />
+                <span>Now discussing</span>
+              </div>
+              <div className="inline-tweets-list">
+                {inlineTweets.map((post) => (
+                  <div key={post.id} className="inline-tweet-card">
+                    <img src={post.authorProfileImageUrl} alt="" className="inline-tweet-avatar" />
+                    <div className="inline-tweet-content">
+                      <span className="inline-tweet-author">@{post.authorUsername}</span>
+                      <p className="inline-tweet-text">{post.text.slice(0, 120)}{post.text.length > 120 ? '...' : ''}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="inline-sync-waiting">
+              <span>▶ Play to see synced tweets</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Compact Horizontal Player */}
+      <div className="podcast-player-compact">
+        <div className="player-icon-small">
+          <Headphones size={24} />
+        </div>
+        <div className="player-info-compact">
+          <div className="player-title-compact">
+            {segmentedScript?.title || 'Audio Overview'}
+          </div>
+        </div>
+        <audio 
+          ref={audioRef}
+          controls 
+          className="audio-element-compact"
+          src={getFullUrl(podcastAudio.podcastUrl)}
+          onTimeUpdate={handleTimeUpdate}
+          onPlay={handlePlay}
+          onPause={handlePause}
+          onEnded={handleEnded}
+        >
+          Your browser does not support the audio element.
+        </audio>
       </div>
     </div>
   );
@@ -853,9 +1028,41 @@ function GrokcastAudioPlayer({
 interface PostCardProps {
   post: Post;
   isHighlighted?: boolean;
+  otherTopics?: TopicSpace[];
+  onMoveTweet?: (postId: string, toTopicId: string) => Promise<void>;
+  isMovingTweet?: boolean;
 }
 
-function PostCard({ post, isHighlighted = false }: PostCardProps) {
+function PostCard({ 
+  post, 
+  isHighlighted = false,
+  otherTopics = [],
+  onMoveTweet,
+  isMovingTweet = false,
+}: PostCardProps) {
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMoveMenu(false);
+      }
+    };
+    if (showMoveMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMoveMenu]);
+
+  const handleMove = async (toTopicId: string) => {
+    if (onMoveTweet) {
+      await onMoveTweet(post.id, toTopicId);
+      setShowMoveMenu(false);
+    }
+  };
+
   return (
     <div className={`post-card ${isHighlighted ? 'highlighted' : ''}`}>
       <div className="post-header">
@@ -866,6 +1073,33 @@ function PostCard({ post, isHighlighted = false }: PostCardProps) {
         </div>
         {isHighlighted && (
           <span className="highlight-badge">🎧 Now playing</span>
+        )}
+        {otherTopics.length > 0 && onMoveTweet && (
+          <div className="post-actions" ref={menuRef}>
+            <button 
+              className="post-action-btn"
+              onClick={() => setShowMoveMenu(!showMoveMenu)}
+              title="Move to another topic"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+            {showMoveMenu && (
+              <div className="post-action-menu">
+                <div className="post-action-menu-header">Move to:</div>
+                {otherTopics.map(topic => (
+                  <button
+                    key={topic.id}
+                    className="post-action-menu-item"
+                    onClick={() => handleMove(topic.id)}
+                    disabled={isMovingTweet}
+                  >
+                    <ArrowRight size={14} />
+                    {topic.title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
       <p className="post-text">{post.text}</p>

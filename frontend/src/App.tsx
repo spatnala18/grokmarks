@@ -20,6 +20,7 @@ import type {
   SegmentedPodcastScript,
   TimelineEntry,
   TopicType,
+  ChatMessage,
 } from './types';
 import './App.css';
 
@@ -34,13 +35,14 @@ function AppContent() {
   const [selectedTopic, setSelectedTopic] = useState<TopicSpaceWithPosts | null>(null);
   const [isLoadingTopics, setIsLoadingTopics] = useState(false);
   const [isLoadingTopic, setIsLoadingTopic] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
   const [showSyncDialog, setShowSyncDialog] = useState(false);
 
   // Actions state
-  const [qaHistory, setQaHistory] = useState<ActionResult[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [briefing, setBriefing] = useState<ActionResult | null>(null);
   const [podcast, setPodcast] = useState<ActionResult | null>(null);
   const [segmentedScript, setSegmentedScript] = useState<SegmentedPodcastScript | null>(null);
@@ -54,6 +56,11 @@ function AppContent() {
   const [isGeneratingPodcast, setIsGeneratingPodcast] = useState(false);
   const [isGeneratingPodcastAudio, setIsGeneratingPodcastAudio] = useState(false);
   const [isGeneratingThread, setIsGeneratingThread] = useState(false);
+
+  // Tweet management state
+  const [isAddingTweet, setIsAddingTweet] = useState(false);
+  const [isMovingTweet, setIsMovingTweet] = useState(false);
+  const [isCreatingTopic, setIsCreatingTopic] = useState(false);
 
   // Memoized callbacks for audio player to prevent infinite loops
   const handleSegmentChange = useCallback((segment: TimelineEntry | null) => {
@@ -173,7 +180,7 @@ function AppContent() {
   const handleSelectTopic = async (topic: TopicSpace) => {
     setIsLoadingTopic(true);
     // Reset actions state for new topic
-    setQaHistory([]);
+    setChatMessages([]);  // Clear chat history when switching topics
     setBriefing(null);
     setPodcast(null);
     setSegmentedScript(null);  // Clear segmented script
@@ -207,8 +214,7 @@ function AppContent() {
       const response = await topicsApi.getHistory(topicId);
       if (response.success && response.data) {
         const actions = response.data.actions;
-        // Separate Q&A from briefing/podcast/thread
-        setQaHistory(actions.filter(a => a.actionType === 'qa'));
+        // Load briefing/podcast/thread (not QA - that's now handled by chat)
         setBriefing(actions.find(a => a.actionType === 'briefing') || null);
         setPodcast(actions.find(a => a.actionType === 'podcast') || null);
         setThread(actions.find(a => a.actionType === 'thread') || null);
@@ -218,13 +224,31 @@ function AppContent() {
     }
   };
 
-  const handleAskQuestion = async (question: string) => {
+  const handleAskQuestion = async (question: string, chatHistory: ChatMessage[]) => {
     if (!selectedTopic) return;
+    
+    // Add user message to chat immediately
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: question,
+      createdAt: new Date().toISOString(),
+    };
+    setChatMessages(prev => [...prev, userMessage]);
+    
     setIsAskingQuestion(true);
     try {
-      const response = await topicsApi.askQuestion(selectedTopic.id, question);
+      const response = await topicsApi.askQuestion(selectedTopic.id, question, chatHistory);
       if (response.success && response.data) {
-        setQaHistory(prev => [...prev, response.data!]);
+        // Add assistant message to chat
+        const assistantMessage: ChatMessage = {
+          id: response.data.id,
+          role: 'assistant',
+          content: response.data.output,
+          createdAt: response.data.createdAt,
+          groundedPostIds: response.data.groundedPostIds,
+        };
+        setChatMessages(prev => [...prev, assistantMessage]);
       } else if (!response.success) {
         showToast('error', response.error || 'Failed to get answer');
       }
@@ -259,6 +283,7 @@ function AppContent() {
     if (!selectedTopic) return;
     setIsGeneratingPodcast(true);
     try {
+      // Step 1: Generate script
       const response = await topicsApi.generatePodcast(selectedTopic.id);
       if (response.success && response.data) {
         // Store both the action result and the segmented script
@@ -266,15 +291,27 @@ function AppContent() {
         setSegmentedScript(response.data.segmentedScript);
         setPodcastAudio(null);  // Clear old audio when regenerating script
         setHighlightedTweetIds([]);  // Clear highlights
-        showToast('success', 'Grokcast generated successfully');
+        
+        // Step 2: Automatically generate audio
+        setIsGeneratingPodcast(false);
+        setIsGeneratingPodcastAudio(true);
+        
+        const audioResponse = await topicsApi.generatePodcastAudio(selectedTopic.id, response.data.segmentedScript);
+        if (audioResponse.success && audioResponse.data) {
+          setPodcastAudio(audioResponse.data);
+          showToast('success', 'Audio Overview ready! Press play to listen.');
+        } else if (!audioResponse.success) {
+          showToast('error', audioResponse.error || 'Failed to generate podcast audio');
+        }
       } else if (!response.success) {
-        showToast('error', response.error || 'Failed to generate Grokcast');
+        showToast('error', response.error || 'Failed to generate Audio Overview');
       }
     } catch (error) {
       console.error('Failed to generate podcast:', error);
-      showToast('error', 'Failed to generate Grokcast. Please try again.');
+      showToast('error', 'Failed to generate Audio Overview. Please try again.');
     } finally {
       setIsGeneratingPodcast(false);
+      setIsGeneratingPodcastAudio(false);
     }
   };
 
@@ -323,6 +360,79 @@ function AppContent() {
     }
   };
 
+  const handleAddTweet = async (tweetUrl: string) => {
+    if (!selectedTopic) return;
+    setIsAddingTweet(true);
+    try {
+      const response = await topicsApi.addTweet(selectedTopic.id, tweetUrl);
+      if (response.success && response.data) {
+        showToast('success', response.data.message);
+        // Refresh the selected topic to get updated posts
+        const refreshResponse = await topicsApi.getOne(selectedTopic.id);
+        if (refreshResponse.success && refreshResponse.data) {
+          setSelectedTopic(refreshResponse.data);
+        }
+        // Refresh topics list for updated counts
+        loadTopics();
+      } else if (!response.success) {
+        showToast('error', response.error || 'Failed to add tweet');
+      }
+    } catch (error) {
+      console.error('Failed to add tweet:', error);
+      showToast('error', 'Failed to add tweet. Please try again.');
+    } finally {
+      setIsAddingTweet(false);
+    }
+  };
+
+  const handleMoveTweet = async (postId: string, toTopicId: string) => {
+    if (!selectedTopic) return;
+    setIsMovingTweet(true);
+    try {
+      const response = await topicsApi.moveTweet(toTopicId, postId, selectedTopic.id);
+      if (response.success && response.data) {
+        showToast('success', response.data.message);
+        // Refresh the selected topic to get updated posts
+        const refreshResponse = await topicsApi.getOne(selectedTopic.id);
+        if (refreshResponse.success && refreshResponse.data) {
+          setSelectedTopic(refreshResponse.data);
+        }
+        // Refresh topics list for updated counts
+        loadTopics();
+      } else if (!response.success) {
+        showToast('error', response.error || 'Failed to move tweet');
+      }
+    } catch (error) {
+      console.error('Failed to move tweet:', error);
+      showToast('error', 'Failed to move tweet. Please try again.');
+    } finally {
+      setIsMovingTweet(false);
+    }
+  };
+
+  const handleCreateTopic = async (title: string) => {
+    setIsCreatingTopic(true);
+    try {
+      const response = await topicsApi.createTopic(title);
+      if (response.success && response.data) {
+        showToast('success', response.data.message);
+        // Refresh topics list
+        await loadTopics();
+        // Select the newly created topic
+        if (response.data.topic) {
+          handleSelectTopic(response.data.topic);
+        }
+      } else if (!response.success) {
+        showToast('error', response.error || 'Failed to create topic');
+      }
+    } catch (error) {
+      console.error('Failed to create topic:', error);
+      showToast('error', 'Failed to create topic. Please try again.');
+    } finally {
+      setIsCreatingTopic(false);
+    }
+  };
+
   const handleRefreshTopic = useCallback(() => {
     // Open sync dialog for refresh
     setShowSyncDialog(true);
@@ -357,11 +467,16 @@ function AppContent() {
           topics={topics}
           selectedTopicId={selectedTopic?.id || null}
           onSelectTopic={handleSelectTopic}
+          onCreateTopic={handleCreateTopic}
           isLoading={isLoadingTopics}
+          isCollapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          isCreatingTopic={isCreatingTopic}
         />
         <CenterPanel
           topic={selectedTopic}
-          qaHistory={qaHistory}
+          chatMessages={chatMessages}
+          onClearChat={() => setChatMessages([])}
           briefing={briefing}
           isLoadingTopic={isLoadingTopic}
           isAskingQuestion={isAskingQuestion}
@@ -374,16 +489,20 @@ function AppContent() {
           segmentedScript={segmentedScript}
           onExitGrokcast={handleExitGrokcast}
           // Podcast/Grokcast props
-          podcast={podcast}
           podcastAudio={podcastAudio}
           isGeneratingPodcast={isGeneratingPodcast}
           isGeneratingPodcastAudio={isGeneratingPodcastAudio}
           onGeneratePodcast={handleGeneratePodcast}
-          onGeneratePodcastAudio={handleGeneratePodcastAudio}
           onHighlightTweets={setHighlightedTweetIds}
           onSegmentChange={handleSegmentChange}
           onGrokcastStart={handleGrokcastStart}
           onGrokcastEnd={handleGrokcastEnd}
+          // Tweet management props
+          allTopics={topics}
+          onAddTweet={handleAddTweet}
+          onMoveTweet={handleMoveTweet}
+          isAddingTweet={isAddingTweet}
+          isMovingTweet={isMovingTweet}
         />
         <RightPanel
           topic={selectedTopic}

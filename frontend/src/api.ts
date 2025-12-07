@@ -15,6 +15,7 @@ import type {
   TopicType,
   LiveTweetsResponse,
   LiveTimeRange,
+  ChatMessage,
 } from './types';
 
 const API_BASE = 'http://localhost:8000';
@@ -95,8 +96,8 @@ export const topicsApi = {
       { segmentedScript, voice }
     ),
   
-  askQuestion: (id: string, question: string) =>
-    fetchApi<ActionResult>('POST', `/api/topics/${id}/qa`, { question }),
+  askQuestion: (id: string, question: string, chatHistory?: ChatMessage[]) =>
+    fetchApi<ActionResult>('POST', `/api/topics/${id}/qa`, { question, chatHistory }),
   
   getHistory: (id: string) =>
     fetchApi<{ actions: ActionResult[] }>('GET', `/api/topics/${id}/history`),
@@ -106,5 +107,29 @@ export const topicsApi = {
     fetchApi<LiveTweetsResponse>(
       'GET', 
       `/api/topics/${id}/live?range=${range}&force=${force}`
+    ),
+  
+  // Create a new empty topic
+  createTopic: (title: string, description?: string) =>
+    fetchApi<{ topic: TopicSpace; message: string }>(
+      'POST',
+      '/api/topics/create',
+      { title, description }
+    ),
+  
+  // Add a tweet to a topic by URL
+  addTweet: (id: string, tweetUrl: string) =>
+    fetchApi<{ post: unknown; topicId: string; message: string }>(
+      'POST',
+      `/api/topics/${id}/add-tweet`,
+      { tweetUrl }
+    ),
+  
+  // Move a tweet from one topic to another
+  moveTweet: (toTopicId: string, postId: string, fromTopicId: string) =>
+    fetchApi<{ postId: string; fromTopicId: string; toTopicId: string; message: string }>(
+      'POST',
+      `/api/topics/${toTopicId}/move-tweet`,
+      { postId, fromTopicId }
     ),
 };

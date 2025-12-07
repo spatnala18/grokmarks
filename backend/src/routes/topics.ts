@@ -6,7 +6,7 @@ import { generateBriefing, generatePodcastScript, answerQuestion, generateThread
 import { extractTrending } from '../services/trending';
 import { generateSegmentedPodcastAudio, getPodcastPath } from '../services/grok-voice';
 import { createCustomTopicSpaces } from '../services/topic-classifier';
-import { searchAllRecentTweets, buildSearchQueryFromTopic } from '../services/x-api';
+import { searchAllRecentTweets, buildSearchQueryFromTopic, getTweetById } from '../services/x-api';
 import type { VoiceId } from '../services/grok-voice';
 
 const router = Router();
@@ -80,6 +80,75 @@ router.get('/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   res.json({
     success: true,
     data: response,
+  });
+});
+
+/**
+ * POST /api/topics/create
+ * 
+ * Create a new empty topic space
+ * Body: { title: string, description?: string }
+ */
+router.post('/create', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { title, description } = req.body;
+
+  if (!title || typeof title !== 'string' || !title.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Topic title is required',
+    });
+  }
+
+  const trimmedTitle = title.trim();
+  
+  // Check for duplicate title
+  const existingTopics = store.getAllTopicSpaces(session.xUserId);
+  const duplicate = existingTopics.find(
+    t => t.title.toLowerCase() === trimmedTitle.toLowerCase()
+  );
+  
+  if (duplicate) {
+    return res.status(400).json({
+      success: false,
+      error: 'A topic with this name already exists',
+    });
+  }
+
+  // Generate a unique ID
+  const topicId = `topic_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const now = new Date().toISOString();
+
+  const newTopic = {
+    id: topicId,
+    title: trimmedTitle,
+    description: description?.trim() || `Custom topic for ${trimmedTitle}`,
+    type: 'custom' as const,
+    bookmarkTweetIds: [],
+    lastBookmarkTime: now,
+    createdAt: now,
+    updatedAt: now,
+    newPostCount: 0,
+  };
+
+  store.saveTopicSpaces(session.xUserId, [newTopic]);
+
+  console.log(`Created new topic "${trimmedTitle}" for @${session.xUsername}`);
+
+  res.json({
+    success: true,
+    data: {
+      topic: {
+        id: newTopic.id,
+        title: newTopic.title,
+        description: newTopic.description,
+        type: newTopic.type,
+        postCount: 0,
+        newPostCount: 0,
+        updatedAt: newTopic.updatedAt,
+      },
+      message: `Topic "${trimmedTitle}" created`,
+    },
   });
 });
 
@@ -369,13 +438,13 @@ router.post('/:id/podcast', requireAuth, async (req: AuthenticatedRequest, res: 
 /**
  * POST /api/topics/:id/qa
  * 
- * Answer a question about a Topic Space
- * Body: { question: string }
+ * Answer a question about a Topic Space (supports multi-turn chat)
+ * Body: { question: string, chatHistory?: ChatMessage[] }
  */
 router.post('/:id/qa', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const session = req.session!;
   const { id } = req.params;
-  const { question } = req.body;
+  const { question, chatHistory } = req.body;
 
   if (!question || typeof question !== 'string' || question.trim().length === 0) {
     return res.status(400).json({
@@ -404,7 +473,7 @@ router.post('/:id/qa', requireAuth, async (req: AuthenticatedRequest, res: Respo
 
   try {
     console.log(`Answering question for "${topicSpace.title}": "${question.slice(0, 50)}..."`);
-    const result = await answerQuestion(topicSpace.title, posts, question.trim());
+    const result = await answerQuestion(topicSpace.title, posts, question.trim(), chatHistory);
     result.topicSpaceId = id;
     
     // Save the result
@@ -725,6 +794,190 @@ router.get('/:id/live', requireAuth, async (req: AuthenticatedRequest, res: Resp
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to fetch live tweets',
+    });
+  }
+});
+
+/**
+ * POST /api/topics/:id/add-tweet
+ * 
+ * Add a tweet to a topic by URL
+ * Body: { tweetUrl: string }
+ */
+router.post('/:id/add-tweet', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { id: topicId } = req.params;
+  const { tweetUrl } = req.body;
+
+  if (!tweetUrl || typeof tweetUrl !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: 'tweetUrl is required',
+    });
+  }
+
+  // Extract tweet ID from URL
+  // Supported formats:
+  // - https://x.com/username/status/1234567890
+  // - https://twitter.com/username/status/1234567890
+  // - Just the tweet ID: 1234567890
+  const tweetIdMatch = tweetUrl.match(/(?:x\.com|twitter\.com)\/\w+\/status\/(\d+)|^(\d+)$/);
+  const tweetId = tweetIdMatch?.[1] || tweetIdMatch?.[2];
+
+  if (!tweetId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid tweet URL. Please provide a valid X/Twitter URL or tweet ID.',
+    });
+  }
+
+  // Check if topic exists
+  const topicSpace = store.getTopicSpace(session.xUserId, topicId);
+  if (!topicSpace) {
+    return res.status(404).json({
+      success: false,
+      error: 'Topic not found',
+    });
+  }
+
+  // Check if tweet is already in this topic
+  if (topicSpace.bookmarkTweetIds.includes(tweetId)) {
+    return res.status(400).json({
+      success: false,
+      error: 'This tweet is already in this topic',
+    });
+  }
+
+  try {
+    // Check if we already have this post cached
+    let post = store.getPost(session.xUserId, tweetId);
+
+    if (!post) {
+      // Fetch the tweet from X API
+      const result = await getTweetById(tweetId, session.accessToken, 'bookmark');
+      post = result.post;
+
+      // Save the post to our store
+      store.savePosts(session.xUserId, [post]);
+    }
+
+    // Add the post to the topic (don't increment newPostCount for manual additions)
+    store.addPostsToTopicSpace(session.xUserId, topicId, [tweetId], false);
+
+    console.log(`Added tweet ${tweetId} to topic "${topicSpace.title}" for @${session.xUsername}`);
+
+    res.json({
+      success: true,
+      data: {
+        post,
+        topicId,
+        message: `Tweet added to "${topicSpace.title}"`,
+      },
+    });
+  } catch (error: any) {
+    console.error('Add tweet error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to add tweet',
+    });
+  }
+});
+
+/**
+ * POST /api/topics/:id/move-tweet
+ * 
+ * Move a tweet from another topic to this topic
+ * Body: { postId: string, fromTopicId: string }
+ */
+router.post('/:id/move-tweet', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { id: toTopicId } = req.params;
+  const { postId, fromTopicId } = req.body;
+
+  if (!postId || typeof postId !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: 'postId is required',
+    });
+  }
+
+  if (!fromTopicId || typeof fromTopicId !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: 'fromTopicId is required',
+    });
+  }
+
+  if (toTopicId === fromTopicId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Cannot move tweet to the same topic',
+    });
+  }
+
+  // Check if source topic exists
+  const fromTopic = store.getTopicSpace(session.xUserId, fromTopicId);
+  if (!fromTopic) {
+    return res.status(404).json({
+      success: false,
+      error: 'Source topic not found',
+    });
+  }
+
+  // Check if destination topic exists
+  const toTopic = store.getTopicSpace(session.xUserId, toTopicId);
+  if (!toTopic) {
+    return res.status(404).json({
+      success: false,
+      error: 'Destination topic not found',
+    });
+  }
+
+  // Check if the post is in the source topic
+  if (!fromTopic.bookmarkTweetIds.includes(postId)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Tweet is not in the source topic',
+    });
+  }
+
+  // Check if the post already exists in destination
+  if (toTopic.bookmarkTweetIds.includes(postId)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Tweet is already in the destination topic',
+    });
+  }
+
+  try {
+    // Remove from source topic
+    const removed = store.removePostFromTopicSpace(session.xUserId, fromTopicId, postId);
+    if (!removed) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to remove tweet from source topic',
+      });
+    }
+
+    // Add to destination topic (don't increment newPostCount for moves)
+    store.addPostsToTopicSpace(session.xUserId, toTopicId, [postId], false);
+
+    console.log(`Moved tweet ${postId} from "${fromTopic.title}" to "${toTopic.title}" for @${session.xUsername}`);
+
+    res.json({
+      success: true,
+      data: {
+        postId,
+        fromTopicId,
+        toTopicId,
+        message: `Tweet moved from "${fromTopic.title}" to "${toTopic.title}"`,
+      },
+    });
+  } catch (error: any) {
+    console.error('Move tweet error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to move tweet',
     });
   }
 });

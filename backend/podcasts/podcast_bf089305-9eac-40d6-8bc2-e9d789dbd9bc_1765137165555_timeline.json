@@ -1,0 +1,44 @@
+{
+  "totalDuration": 71.781,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 10.40325,
+      "duration": 10.40325,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 10.40325,
+      "endTime": 35.7345,
+      "duration": 25.33125,
+      "tweetIds": [
+        "1995553798274912390",
+        "1996269783512183156",
+        "1996621856447909990"
+      ],
+      "themeTitle": "Inference Arms Race"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 35.7345,
+      "endTime": 61.35375,
+      "duration": 25.61925,
+      "tweetIds": [
+        "1995353987806306804",
+        "1995736070655492342",
+        "1995913105327751342"
+      ],
+      "themeTitle": "Black Box Breakers"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 61.35375,
+      "endTime": 71.781,
+      "duration": 10.42725,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T19:52:45.557Z"
+}

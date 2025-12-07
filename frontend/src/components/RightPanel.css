@@ -123,6 +123,30 @@
   padding: 14px;
 }
 
+/* Compact variant for trending section */
+.trending-section.compact {
+  padding: 10px 12px;
+  flex-shrink: 0;
+}
+
+.trending-section.compact .section-header {
+  margin-bottom: 8px;
+}
+
+.trending-section.compact .trending-group {
+  margin-bottom: 6px;
+}
+
+.trending-section.compact .trending-label {
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+
+.trending-section.compact .trending-tag {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -153,7 +177,11 @@
 .trending-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
+}
+
+.trending-section.compact .trending-tags {
+  gap: 4px;
 }
 
 .trending-tag {
@@ -196,6 +224,15 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+/* Live Tweets Section - takes most of the space */
+.live-tweets-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .recent-posts-list {
