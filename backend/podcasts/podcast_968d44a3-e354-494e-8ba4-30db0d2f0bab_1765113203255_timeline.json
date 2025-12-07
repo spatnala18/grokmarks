@@ -1,0 +1,44 @@
+{
+  "totalDuration": 15.128800000000002,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 2.3582,
+      "duration": 2.3582,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 2.3582,
+      "endTime": 7.7948,
+      "duration": 5.4366,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995204706961076516",
+        "1995547244431647199"
+      ],
+      "themeTitle": "Agent Building Boom"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 7.7948,
+      "endTime": 12.777000000000001,
+      "duration": 4.9822,
+      "tweetIds": [
+        "1996236745990688896",
+        "1996708226617036800",
+        "1996755929296261147"
+      ],
+      "themeTitle": "RL and Post-Training Push"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 12.777000000000001,
+      "endTime": 15.128800000000002,
+      "duration": 2.3518,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:13:23.257Z"
+}

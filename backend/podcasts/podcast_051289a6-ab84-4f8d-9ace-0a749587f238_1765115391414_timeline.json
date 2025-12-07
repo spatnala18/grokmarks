@@ -1,0 +1,43 @@
+{
+  "totalDuration": 54.189,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 8.96325,
+      "duration": 8.96325,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 8.96325,
+      "endTime": 27.3825,
+      "duration": 18.41925,
+      "tweetIds": [
+        "1995242558117847404",
+        "1996857472439767546"
+      ],
+      "themeTitle": "Connections Spark Market Storms"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 27.3825,
+      "endTime": 46.04175,
+      "duration": 18.65925,
+      "tweetIds": [
+        "1996202143368573035",
+        "1996648082541568058",
+        "1997126533060903239"
+      ],
+      "themeTitle": "VC Pivots Fuel the Race"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 46.04175,
+      "endTime": 54.189,
+      "duration": 8.14725,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:49:51.416Z"
+}

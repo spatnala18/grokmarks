@@ -1,0 +1,44 @@
+{
+  "totalDuration": 66.213,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 8.17125,
+      "duration": 8.17125,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 8.17125,
+      "endTime": 31.8465,
+      "duration": 23.67525,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995572419218796567",
+        "1995712777680228669"
+      ],
+      "themeTitle": "Agent Builder Frenzy"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 31.8465,
+      "endTime": 55.857749999999996,
+      "duration": 24.01125,
+      "tweetIds": [
+        "1995204706961076516",
+        "1995547244431647199",
+        "1996236745990688896"
+      ],
+      "themeTitle": "RL and Scaling Surge"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 55.857749999999996,
+      "endTime": 66.213,
+      "duration": 10.35525,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:34:16.968Z"
+}

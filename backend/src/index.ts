@@ -1,12 +1,14 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import path from 'path';
 import { config, validateConfig } from './config';
 import authRoutes from './routes/auth';
 import xDataRoutes from './routes/x-data';
 import topicsRoutes from './routes/topics';
 import testRoutes from './routes/test';
 import { store } from './store/memory-store';
+import { getPodcastPath } from './services/grok-voice';
 
 // Validate environment variables
 validateConfig();
@@ -26,6 +28,35 @@ app.use('/auth', authRoutes);
 app.use('/api/x', xDataRoutes);
 app.use('/api/topics', topicsRoutes);
 app.use('/test', testRoutes);
+
+// Serve podcast audio files
+app.get('/api/podcasts/:filename', (req, res) => {
+  const { filename } = req.params;
+  
+  // Validate filename (security) - allow mp3, wav, opus, flac
+  if (!filename.match(/^podcast_[\w-]+_\d+\.(mp3|wav|opus|flac)$/)) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  
+  const filePath = getPodcastPath(filename);
+  
+  if (!filePath) {
+    return res.status(404).json({ error: 'Podcast not found' });
+  }
+  
+  // Set appropriate content type based on extension
+  const ext = filename.split('.').pop();
+  const contentTypes: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    opus: 'audio/opus',
+    flac: 'audio/flac',
+  };
+  
+  res.setHeader('Content-Type', contentTypes[ext!] || 'audio/mpeg');
+  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+  res.sendFile(filePath);
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {

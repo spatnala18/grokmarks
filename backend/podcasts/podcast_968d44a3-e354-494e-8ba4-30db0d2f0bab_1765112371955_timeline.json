@@ -1,0 +1,51 @@
+{
+  "totalDuration": 15.8008,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 2.5886,
+      "duration": 2.5886,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 2.5886,
+      "endTime": 8.0892,
+      "duration": 5.5006,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995547244431647199",
+        "1995572419218796567",
+        "1995712777680228669",
+        "1995965157869252672",
+        "1996259896506138664"
+      ],
+      "themeTitle": "Agent Builders Sought"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 8.0892,
+      "endTime": 13.8458,
+      "duration": 5.7566,
+      "tweetIds": [
+        "1995204706961076516",
+        "1996236745990688896",
+        "1996269950957432932",
+        "1996445466062659957",
+        "1996708226617036800",
+        "1996755929296261147",
+        "1996983336833815021"
+      ],
+      "themeTitle": "Scaling and Post-Training Push"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 13.8458,
+      "endTime": 15.8008,
+      "duration": 1.955,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T12:59:31.957Z"
+}

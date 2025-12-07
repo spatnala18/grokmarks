@@ -9,7 +9,7 @@ import {
   getAuthenticatedUser,
   refreshAccessToken,
 } from '../services/x-auth';
-import { store } from '../store/memory-store';
+import { store } from '../store/index';
 import { UserSession } from '../types';
 import { config } from '../config';
 
@@ -137,14 +137,14 @@ router.get('/callback', async (req: Request, res: Response) => {
   if (error) {
     console.error('OAuth error:', error, error_description);
     return res.redirect(
-      `${config.frontendUrl}/auth/error?error=${encodeURIComponent(String(error))}`
+      `${config.frontendUrl}?error=${encodeURIComponent(String(error))}`
     );
   }
 
   // Validate required params
   if (!code || !state) {
     return res.redirect(
-      `${config.frontendUrl}/auth/error?error=missing_params`
+      `${config.frontendUrl}?error=missing_params`
     );
   }
 
@@ -154,7 +154,7 @@ router.get('/callback', async (req: Request, res: Response) => {
   if (!oauthState) {
     console.error('Invalid or expired state');
     return res.redirect(
-      `${config.frontendUrl}/auth/error?error=invalid_state`
+      `${config.frontendUrl}?error=invalid_state`
     );
   }
 
@@ -196,12 +196,12 @@ router.get('/callback', async (req: Request, res: Response) => {
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    // Redirect to frontend
-    res.redirect(`${config.frontendUrl}/auth/success`);
+    // Redirect to frontend (root - SPA will handle auth state)
+    res.redirect(config.frontendUrl);
   } catch (error: any) {
     console.error('OAuth callback error:', error.response?.data || error.message);
     res.redirect(
-      `${config.frontendUrl}/auth/error?error=token_exchange_failed`
+      `${config.frontendUrl}?error=auth_failed`
     );
   }
 });
@@ -241,13 +241,29 @@ router.post('/logout', authMiddleware, (req: AuthenticatedRequest, res: Response
 
 /**
  * GET /auth/status
- * Quick check if user is authenticated (no user details)
+ * Check if user is authenticated and return user details if so
  */
 router.get('/status', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  if (!req.session) {
+    return res.json({
+      success: true,
+      data: {
+        authenticated: false,
+      },
+    });
+  }
+
+  // Return authenticated status WITH user info
   res.json({
     success: true,
     data: {
-      authenticated: !!req.session,
+      authenticated: true,
+      user: {
+        xUserId: req.session.xUserId,
+        username: req.session.xUsername,
+        displayName: req.session.xDisplayName,
+        profileImageUrl: req.session.xProfileImageUrl,
+      },
     },
   });
 });

@@ -1,0 +1,59 @@
+{
+  "totalDuration": 22.619799999999998,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 2.0638,
+      "duration": 2.0638,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 2.0638,
+      "endTime": 7.308400000000001,
+      "duration": 5.2446,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995547244431647199",
+        "1995572419218796567",
+        "1996983336833815021"
+      ],
+      "themeTitle": "Big Labs Chase Frontier Talent"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 7.308400000000001,
+      "endTime": 14.5946,
+      "duration": 7.2862,
+      "tweetIds": [
+        "1995712777680228669",
+        "1995965157869252672",
+        "1996259896506138664",
+        "1996445466062659957"
+      ],
+      "themeTitle": "Agents Dominate Job Calls"
+    },
+    {
+      "segmentId": "theme_3",
+      "startTime": 14.5946,
+      "endTime": 20.3192,
+      "duration": 5.7246,
+      "tweetIds": [
+        "1996236745990688896",
+        "1996269950957432932",
+        "1996755929296261147",
+        "1996708226617036800"
+      ],
+      "themeTitle": "Startups Offer Quick Wins"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 20.3192,
+      "endTime": 22.619799999999998,
+      "duration": 2.3006,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T12:53:06.971Z"
+}

@@ -172,6 +172,35 @@
   background: var(--bg-tertiary);
   border-radius: 12px;
   padding: 14px;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+}
+
+/* Highlighted post when audio is discussing it */
+.post-card.highlighted {
+  background: rgba(29, 155, 240, 0.1);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.2);
+  animation: pulse-highlight 2s ease-in-out infinite;
+}
+
+@keyframes pulse-highlight {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(29, 155, 240, 0.3);
+  }
+}
+
+.highlight-badge {
+  margin-left: auto;
+  font-size: 11px;
+  background: var(--accent-primary);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
 }
 
 .post-header {
@@ -313,4 +342,277 @@
 .question-submit:disabled {
   background: var(--bg-active);
   color: var(--text-tertiary);
+}
+
+/* ============================================
+   GROKCAST MODE STYLES
+   ============================================ */
+
+.center-panel.grokcast-mode {
+  background: linear-gradient(180deg, var(--bg-primary) 0%, rgba(29, 155, 240, 0.03) 100%);
+}
+
+.grokcast-view {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 24px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Grokcast Header */
+.grokcast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border-primary);
+}
+
+.grokcast-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.grokcast-icon {
+  color: var(--accent-primary);
+}
+
+.grokcast-icon.pulse {
+  animation: grokcastPulse 2s infinite;
+}
+
+@keyframes grokcastPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+
+.grokcast-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.grokcast-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.grokcast-exit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.grokcast-exit:hover {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+/* Waiting state */
+.grokcast-waiting {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 60px 20px;
+  position: relative;
+}
+
+.grokcast-waiting svg {
+  color: var(--accent-primary);
+  opacity: 0.7;
+}
+
+.grokcast-waiting p {
+  font-size: 18px;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.grokcast-hint {
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+
+.grokcast-pulse-ring {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border: 2px solid var(--accent-primary);
+  border-radius: 50%;
+  opacity: 0;
+  animation: pulseRing 2s infinite;
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(0.5); opacity: 0.5; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+/* Current Segment */
+.grokcast-segment {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.segment-header {
+  text-align: center;
+}
+
+.segment-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 30px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.segment-type.intro {
+  background: linear-gradient(135deg, rgba(29, 155, 240, 0.15), rgba(29, 155, 240, 0.05));
+  color: var(--accent-primary);
+  border: 1px solid rgba(29, 155, 240, 0.3);
+}
+
+.segment-type.theme {
+  background: linear-gradient(135deg, rgba(0, 186, 124, 0.15), rgba(0, 186, 124, 0.05));
+  color: #00ba7c;
+  border: 1px solid rgba(0, 186, 124, 0.3);
+}
+
+.segment-type.wrapup {
+  background: linear-gradient(135deg, rgba(249, 24, 128, 0.15), rgba(249, 24, 128, 0.05));
+  color: #f91880;
+  border: 1px solid rgba(249, 24, 128, 0.3);
+}
+
+/* Segment Tweets */
+.segment-tweets {
+  flex: 1;
+}
+
+.segment-tweets-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.segment-tweets-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.segment-tweet-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 16px;
+  padding: 16px;
+  animation: slideIn 0.3s ease-out forwards;
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+@keyframes slideIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.segment-tweet-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.segment-tweet-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.segment-tweet-author {
+  display: flex;
+  flex-direction: column;
+}
+
+.segment-tweet-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.segment-tweet-handle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.segment-tweet-text {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  margin: 0 0 12px 0;
+  white-space: pre-wrap;
+}
+
+.segment-tweet-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+
+.segment-tweet-link:hover {
+  text-decoration: underline;
+}
+
+/* No tweets for segment */
+.segment-no-tweets {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.segment-no-tweets .sparkle-icon {
+  color: var(--accent-primary);
+  opacity: 0.5;
+}
+
+.segment-no-tweets p {
+  font-size: 16px;
+  margin: 0;
 }

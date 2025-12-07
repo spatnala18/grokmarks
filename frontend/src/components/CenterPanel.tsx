@@ -2,7 +2,7 @@
 // Center Panel - Main Topic View
 // ============================================
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   Clock, 
   Bookmark, 
@@ -11,9 +11,11 @@ import {
   ChevronUp,
   Send,
   Sparkles,
-  MessageCircle
+  MessageCircle,
+  Headphones,
+  X
 } from 'lucide-react';
-import type { TopicSpaceWithPosts, Post, ActionResult } from '../types';
+import type { TopicSpaceWithPosts, Post, ActionResult, TimelineEntry, SegmentedPodcastScript } from '../types';
 import { parseCitations } from '../utils';
 import './CenterPanel.css';
 
@@ -23,6 +25,11 @@ interface CenterPanelProps {
   isLoadingTopic: boolean;
   isAskingQuestion: boolean;
   onAskQuestion: (question: string) => void;
+  highlightedTweetIds?: string[];
+  grokcastMode?: boolean;
+  currentSegment?: TimelineEntry | null;
+  segmentedScript?: SegmentedPodcastScript | null;
+  onExitGrokcast?: () => void;
 }
 
 export function CenterPanel({ 
@@ -30,10 +37,32 @@ export function CenterPanel({
   qaHistory, 
   isLoadingTopic, 
   isAskingQuestion,
-  onAskQuestion 
+  onAskQuestion,
+  highlightedTweetIds = [],
+  grokcastMode = false,
+  currentSegment = null,
+  segmentedScript = null,
+  onExitGrokcast,
 }: CenterPanelProps) {
   const [showPosts, setShowPosts] = useState(false);
   const [question, setQuestion] = useState('');
+
+  // Get tweets for the current segment during grokcast mode
+  const segmentTweets = useMemo(() => {
+    if (!grokcastMode || !topic || !currentSegment) {
+      return [];
+    }
+    const tweetIds = currentSegment.tweetIds.slice(0, 3); // Cap at 3 tweets per segment
+    return tweetIds
+      .map(id => topic.posts.find(p => p.id === id))
+      .filter((p): p is Post => !!p);
+  }, [grokcastMode, topic, currentSegment]);
+
+  // Get current segment details from the script
+  const currentScriptSegment = useMemo(() => {
+    if (!segmentedScript || !currentSegment) return null;
+    return segmentedScript.segments.find(s => s.segmentId === currentSegment.segmentId);
+  }, [segmentedScript, currentSegment]);
 
   const handleSubmitQuestion = () => {
     if (question.trim() && !isAskingQuestion) {
@@ -83,6 +112,114 @@ export function CenterPanel({
     .filter(s => s.trim().length > 20)
     .slice(0, 4)
     .map(s => s.trim());
+
+  // ============================================
+  // GROKCAST MODE - Show segment-by-segment view
+  // ============================================
+  if (grokcastMode) {
+    return (
+      <main className="center-panel grokcast-mode">
+        <div className="grokcast-view">
+          {/* Grokcast Header */}
+          <div className="grokcast-header">
+            <div className="grokcast-header-left">
+              <Headphones size={24} className="grokcast-icon pulse" />
+              <div>
+                <h2 className="grokcast-title">
+                  {segmentedScript?.title || 'Grokcast Playing'}
+                </h2>
+                <span className="grokcast-subtitle">
+                  Following along with the podcast
+                </span>
+              </div>
+            </div>
+            <button className="grokcast-exit" onClick={onExitGrokcast}>
+              <X size={18} />
+              Exit
+            </button>
+          </div>
+
+          {/* Current Segment Display */}
+          {currentSegment ? (
+            <div className="grokcast-segment fade-in">
+              {/* Segment Theme/Type */}
+              <div className="segment-header">
+                {currentScriptSegment?.segmentType === 'intro' && (
+                  <span className="segment-type intro">🎙️ Introduction</span>
+                )}
+                {currentScriptSegment?.segmentType === 'theme' && (
+                  <span className="segment-type theme">
+                    💡 {currentScriptSegment?.themeTitle || 'Theme'}
+                  </span>
+                )}
+                {currentScriptSegment?.segmentType === 'wrapup' && (
+                  <span className="segment-type wrapup">🎯 Wrap Up</span>
+                )}
+              </div>
+
+              {/* Segment Tweets - Only show if there are tweets for this segment */}
+              {segmentTweets.length > 0 ? (
+                <div className="segment-tweets">
+                  <div className="segment-tweets-label">
+                    Related posts ({segmentTweets.length})
+                  </div>
+                  <div className="segment-tweets-grid">
+                    {segmentTweets.map((post, index) => (
+                      <div 
+                        key={post.id} 
+                        className="segment-tweet-card fade-in"
+                        style={{ animationDelay: `${index * 100}ms` }}
+                      >
+                        <div className="segment-tweet-header">
+                          <img src={post.authorProfileImageUrl} alt="" className="segment-tweet-avatar" />
+                          <div className="segment-tweet-author">
+                            <span className="segment-tweet-name">{post.authorDisplayName}</span>
+                            <span className="segment-tweet-handle">@{post.authorUsername}</span>
+                          </div>
+                        </div>
+                        <p className="segment-tweet-text">{post.text}</p>
+                        <a
+                          href={post.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="segment-tweet-link"
+                        >
+                          <ExternalLink size={12} />
+                          View on X
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="segment-no-tweets">
+                  <Sparkles size={32} className="sparkle-icon" />
+                  <p>
+                    {currentScriptSegment?.segmentType === 'intro' 
+                      ? 'Setting the stage...' 
+                      : currentScriptSegment?.segmentType === 'wrapup'
+                      ? 'Wrapping up the discussion...'
+                      : 'No specific tweets for this segment'}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grokcast-waiting">
+              <div className="grokcast-pulse-ring"></div>
+              <Headphones size={48} />
+              <p>Waiting for audio to start...</p>
+              <span className="grokcast-hint">Press play in the audio player to begin</span>
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  // ============================================
+  // NORMAL MODE - Standard topic view
+  // ============================================
 
   return (
     <main className="center-panel">
@@ -137,7 +274,11 @@ export function CenterPanel({
           {showPosts && (
             <div className="posts-list">
               {topic.posts.slice(0, 10).map((post) => (
-                <PostCard key={post.id} post={post} />
+                <PostCard 
+                  key={post.id} 
+                  post={post} 
+                  isHighlighted={highlightedTweetIds.includes(post.id)}
+                />
               ))}
             </div>
           )}
@@ -202,15 +343,23 @@ export function CenterPanel({
 }
 
 // Post Card Component
-function PostCard({ post }: { post: Post }) {
+interface PostCardProps {
+  post: Post;
+  isHighlighted?: boolean;
+}
+
+function PostCard({ post, isHighlighted = false }: PostCardProps) {
   return (
-    <div className="post-card">
+    <div className={`post-card ${isHighlighted ? 'highlighted' : ''}`}>
       <div className="post-header">
         <img src={post.authorProfileImageUrl} alt="" className="post-avatar" />
         <div className="post-author-info">
           <span className="post-author-name">{post.authorDisplayName}</span>
           <span className="post-author-handle">@{post.authorUsername}</span>
         </div>
+        {isHighlighted && (
+          <span className="highlight-badge">🎧 Now playing</span>
+        )}
       </div>
       <p className="post-text">{post.text}</p>
       <a

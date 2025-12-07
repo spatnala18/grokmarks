@@ -1,0 +1,44 @@
+{
+  "totalDuration": 15.8648,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 2.2174,
+      "duration": 2.2174,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 2.2174,
+      "endTime": 7.839600000000001,
+      "duration": 5.6222,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995204706961076516",
+        "1995547244431647199"
+      ],
+      "themeTitle": "Agent Builders in Demand"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 7.839600000000001,
+      "endTime": 13.372200000000001,
+      "duration": 5.5326,
+      "tweetIds": [
+        "1995965157869252672",
+        "1996236745990688896",
+        "1996708226617036800"
+      ],
+      "themeTitle": "Post-Training Power Shift"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 13.372200000000001,
+      "endTime": 15.8648,
+      "duration": 2.4926,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:17:34.951Z"
+}

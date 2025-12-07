@@ -1,8 +1,11 @@
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware, requireAuth } from './auth';
-import { store } from '../store/memory-store';
-import { TopicSpaceDetailResponse } from '../types';
-import { generateBriefing, generatePodcastScript, answerQuestion } from '../services/grok-actions';
+import { store } from '../store/index';
+import { TopicSpaceDetailResponse, SegmentedPodcastScript } from '../types';
+import { generateBriefing, generatePodcastScript, answerQuestion, generateThread } from '../services/grok-actions';
+import { extractTrending } from '../services/trending';
+import { generateSegmentedPodcastAudio, getPodcastPath } from '../services/grok-voice';
+import type { VoiceId } from '../services/grok-voice';
 
 const router = Router();
 
@@ -61,9 +64,13 @@ router.get('/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   // Sort posts by date (newest first)
   posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+  // Extract trending data
+  const trending = extractTrending(posts);
+
   const response: TopicSpaceDetailResponse = {
     ...topicSpace,
     posts,
+    trending,
   };
 
   res.json({
@@ -151,7 +158,8 @@ router.post('/:id/briefing', requireAuth, async (req: AuthenticatedRequest, res:
 /**
  * POST /api/topics/:id/podcast
  * 
- * Generate a podcast script for a Topic Space
+ * Generate a SEGMENTED podcast script for a Topic Space
+ * Returns both the action result and the segmented script for audio generation
  */
 router.post('/:id/podcast', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const session = req.session!;
@@ -176,18 +184,21 @@ router.post('/:id/podcast', requireAuth, async (req: AuthenticatedRequest, res: 
   }
 
   try {
-    console.log(`Generating podcast script for "${topicSpace.title}" (${posts.length} posts)...`);
-    const result = await generatePodcastScript(topicSpace.title, posts);
-    result.topicSpaceId = id;
+    console.log(`Generating SEGMENTED podcast script for "${topicSpace.title}" (${posts.length} posts)...`);
+    const { actionResult, segmentedScript } = await generatePodcastScript(topicSpace.title, posts);
+    actionResult.topicSpaceId = id;
     
-    // Save the result
-    store.saveActionResult(session.xUserId, result);
+    // Save the action result
+    store.saveActionResult(session.xUserId, actionResult);
     
-    console.log(`Podcast script generated successfully`);
+    console.log(`Podcast script generated: ${segmentedScript.segments.length} segments`);
     
     res.json({
       success: true,
-      data: result,
+      data: {
+        actionResult,
+        segmentedScript,
+      },
     });
   } catch (error: any) {
     console.error('Podcast error:', error);
@@ -258,6 +269,56 @@ router.post('/:id/qa', requireAuth, async (req: AuthenticatedRequest, res: Respo
 });
 
 /**
+ * POST /api/topics/:id/thread
+ * 
+ * Generate a Twitter/X thread for a Topic Space
+ */
+router.post('/:id/thread', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { id } = req.params;
+
+  const topicSpace = store.getTopicSpace(session.xUserId, id);
+  
+  if (!topicSpace) {
+    return res.status(404).json({
+      success: false,
+      error: 'Topic Space not found',
+    });
+  }
+
+  const posts = store.getPostsByIds(session.xUserId, topicSpace.postIds);
+
+  if (posts.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'No posts in this Topic Space',
+    });
+  }
+
+  try {
+    console.log(`Generating thread for "${topicSpace.title}" (${posts.length} posts)...`);
+    const result = await generateThread(topicSpace.title, posts);
+    result.topicSpaceId = id;
+    
+    // Save the result
+    store.saveActionResult(session.xUserId, result);
+    
+    console.log(`Thread generated successfully`);
+    
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('Thread error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate thread',
+    });
+  }
+});
+
+/**
  * GET /api/topics/:id/history
  * 
  * Get action history for a Topic Space
@@ -286,6 +347,61 @@ router.get('/:id/history', requireAuth, (req: AuthenticatedRequest, res: Respons
       ),
     },
   });
+});
+
+/**
+ * POST /api/topics/:id/podcast-audio
+ * 
+ * Generate audio from a SEGMENTED podcast script using Grok Voice API
+ * Requires: segmentedScript in request body
+ * Optional: voice (VoiceId)
+ * Returns: audio URL + timeline manifest for frontend sync
+ */
+router.post('/:id/podcast-audio', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { id } = req.params;
+  const { segmentedScript, voice } = req.body as { 
+    segmentedScript?: SegmentedPodcastScript; 
+    voice?: VoiceId;
+  };
+
+  console.log(`Generating SEGMENTED podcast audio for topic ${id}...`);
+
+  const topicSpace = store.getTopicSpace(session.xUserId, id);
+  
+  if (!topicSpace) {
+    return res.status(404).json({
+      success: false,
+      error: 'Topic Space not found',
+    });
+  }
+
+  if (!segmentedScript || !segmentedScript.segments || segmentedScript.segments.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'No segmented podcast script provided. Generate a podcast script first.',
+    });
+  }
+
+  try {
+    console.log(`Processing ${segmentedScript.segments.length} segments...`);
+    
+    const result = await generateSegmentedPodcastAudio(id, segmentedScript, { voice });
+    
+    console.log(`Podcast audio generated: ${result.podcastUrl}`);
+    console.log(`Timeline: ${result.timeline.entries.length} entries, ${result.timeline.totalDuration.toFixed(2)}s total`);
+    
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('Podcast audio error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate podcast audio',
+    });
+  }
 });
 
 export default router;

@@ -1,0 +1,44 @@
+{
+  "totalDuration": 18.776799999999998,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 2.787,
+      "duration": 2.787,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 2.787,
+      "endTime": 8.9596,
+      "duration": 6.1726,
+      "tweetIds": [
+        "1995353987806306804",
+        "1995553798274912390",
+        "1996269783512183156"
+      ],
+      "themeTitle": "Inference Fires Up"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 8.9596,
+      "endTime": 16.4122,
+      "duration": 7.4526,
+      "tweetIds": [
+        "1996442036925239510",
+        "1996654436748611608",
+        "1996659065976729807"
+      ],
+      "themeTitle": "Training Stays Tough"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 16.4122,
+      "endTime": 18.776799999999998,
+      "duration": 2.3646,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:30:58.078Z"
+}

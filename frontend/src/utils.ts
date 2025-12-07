@@ -7,7 +7,7 @@
  */
 export function parseCitations(text: string): string {
   // Convert [tweetId] to clickable links
-  let html = text.replace(/\[(\d{15,25})\]/g, (match, tweetId) => {
+  let html = text.replace(/\[(\d{15,25})\]/g, (_match, tweetId) => {
     return `<a href="https://x.com/i/status/${tweetId}" target="_blank" rel="noopener noreferrer" class="citation" title="View tweet">[↗]</a>`;
   });
 

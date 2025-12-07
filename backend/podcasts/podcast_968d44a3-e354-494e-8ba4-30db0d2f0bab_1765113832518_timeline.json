@@ -1,0 +1,44 @@
+{
+  "totalDuration": 15.0456,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 2.083,
+      "duration": 2.083,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 2.083,
+      "endTime": 7.3852,
+      "duration": 5.3022,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995712777680228669",
+        "1995965157869252672"
+      ],
+      "themeTitle": "Agent Building Boom"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 7.3852,
+      "endTime": 12.3994,
+      "duration": 5.0142,
+      "tweetIds": [
+        "1995204706961076516",
+        "1995547244431647199",
+        "1995572419218796567"
+      ],
+      "themeTitle": "Scaling and Robotics Rush"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 12.3994,
+      "endTime": 15.0456,
+      "duration": 2.6462,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:23:52.520Z"
+}

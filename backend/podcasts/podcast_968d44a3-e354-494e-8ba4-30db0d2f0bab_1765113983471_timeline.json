@@ -1,0 +1,44 @@
+{
+  "totalDuration": 15.372,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 2.1726,
+      "duration": 2.1726,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 2.1726,
+      "endTime": 7.3916,
+      "duration": 5.219,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995547244431647199",
+        "1995572419218796567"
+      ],
+      "themeTitle": "Agents Are the New Kings"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 7.3916,
+      "endTime": 13.0778,
+      "duration": 5.6862,
+      "tweetIds": [
+        "1995204706961076516",
+        "1995965157869252672",
+        "1996259896506138664"
+      ],
+      "themeTitle": "RL and Post-Training Surge"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 13.0778,
+      "endTime": 15.372,
+      "duration": 2.2942,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:26:23.472Z"
+}

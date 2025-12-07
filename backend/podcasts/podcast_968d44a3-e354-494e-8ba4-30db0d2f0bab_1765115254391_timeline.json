@@ -1,0 +1,44 @@
+{
+  "totalDuration": 56.973,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 10.54725,
+      "duration": 10.54725,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 10.54725,
+      "endTime": 30.454500000000003,
+      "duration": 19.90725,
+      "tweetIds": [
+        "1995965157869252672",
+        "1996259896506138664",
+        "1996445466062659957"
+      ],
+      "themeTitle": "Agent Mania Takes Over"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 30.454500000000003,
+      "endTime": 48.82575,
+      "duration": 18.37125,
+      "tweetIds": [
+        "1995547244431647199",
+        "1995196912052715561",
+        "1995204706961076516"
+      ],
+      "themeTitle": "Robotics and Scaling Surge"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 48.82575,
+      "endTime": 56.973,
+      "duration": 8.14725,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T13:47:34.393Z"
+}

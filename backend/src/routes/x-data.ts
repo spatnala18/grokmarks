@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware, requireAuth } from './auth';
 import { getAllBookmarks, getTimelinePosts } from '../services/x-api';
 import { classifyAndCreateTopicSpaces } from '../services/topic-classifier';
-import { store } from '../store/memory-store';
+import { store } from '../store/index';
 import { Post } from '../types';
 
 const router = Router();

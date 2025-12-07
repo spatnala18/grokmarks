@@ -6,7 +6,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { grokStrong, parseJsonResponse, ChatMessage } from './grok';
 import { HYPERPARAMS } from '../config/hyperparams';
-import { Post, ActionResult, ActionType } from '../types';
+import { Post, ActionResult, ActionType, PodcastSegment, SegmentedPodcastScript } from '../types';
 
 /**
  * Briefing response from Grok - with inline citations
@@ -140,76 +140,160 @@ ${postsText}`;
 }
 
 /**
- * Generate a podcast script for a Topic Space - conversational, no inline IDs
+ * Generate a SEGMENTED podcast script for a Topic Space
+ * Returns theme-based segments with tweet associations for timeline sync
  */
 export async function generatePodcastScript(
   topicTitle: string,
   posts: Post[]
-): Promise<ActionResult> {
+): Promise<{ actionResult: ActionResult; segmentedScript: SegmentedPodcastScript }> {
   const postsText = formatPostsForPrompt(posts, 25);
   const validIds = getValidTweetIds(posts);
   
-  // Collect handles for reference
-  const handles = [...new Set(posts.map(p => `@${p.authorUsername}`))];
+  // Collect handles and create readable name mappings
+  const handleToName = new Map<string, string>();
+  posts.forEach(p => {
+    if (p.authorUsername && p.authorDisplayName) {
+      handleToName.set(p.authorUsername.toLowerCase(), p.authorDisplayName);
+    }
+  });
+  const handleMappings = [...handleToName.entries()]
+    .slice(0, 15)
+    .map(([handle, name]) => `@${handle} → "${name}"`)
+    .join(', ');
   
-  const systemPrompt = `You are Grok, hosting "Grokcast" - a podcast where you discuss interesting topics from Twitter/X.
+  const systemPrompt = `You are Grok, hosting "Grokcast" - a spoken audio podcast. This will be converted to audio, so write for LISTENING.
 
-STYLE:
-- Open with: "Hey everyone, welcome back to Grokcast! Today we're diving into [topic]..."
-- Be conversational, engaging, and slightly witty
-- Speak naturally as if talking to listeners
-- Reference specific people by their @handles when discussing their points
-- Add your own perspective and synthesis
-- End with a wrap-up and "Until next time!" sign-off
+=== CRITICAL: WHAT NOT TO DO ===
+❌ DO NOT list people's names one after another
+❌ DO NOT say "Person X said this, Person Y said that"  
+❌ DO NOT mention more than 2-3 names in the ENTIRE podcast
+❌ DO NOT summarize individual tweets
+❌ DO NOT be a news anchor reading headlines
 
-IMPORTANT:
-- Do NOT use [tweetId] style citations - this is spoken word
-- DO mention @handles naturally in conversation (e.g., "@swyx points out that...")
-- Keep it 3-5 minutes when read aloud (~500-800 words)
-- Base everything ONLY on the provided tweets
+=== WHAT TO DO INSTEAD ===
+✅ Talk about TRENDS and PATTERNS you see
+✅ Tell a STORY about what's happening in the space
+✅ Use phrases like "teams are hunting for...", "the vibe is...", "what stands out is..."
+✅ Give your OPINION and ANALYSIS
+✅ Make the listener FEEL the energy, don't list facts
 
-Return JSON:
+=== EXAMPLE OF BAD (don't do this) ===
+"Aaron Lou seeks researchers at OpenAI. Jim Fan hunts robotics experts. Ruiqi Gao wants scientists..."
+^ This is a LAUNDRY LIST. Boring. Mechanical.
+
+=== EXAMPLE OF GOOD (do this) ===
+"If you walk NeurIPS right now, it feels like a feeding frenzy. Every major lab has recruiters camped out. The message is clear: if you can ship agents that actually work, you're the main character. A year ago everyone wanted foundation model people. Now? It's all about making AI act, not just predict tokens."
+^ This is STORYTELLING. Engaging. Opinionated.
+
+=== TTS RULES ===
+- Short sentences. One idea each.
+- No @handles ever. Say "one researcher" or "a team" instead of names.
+- Spell out: "L L M", "G P T", "A I"
+
+=== OUTPUT FORMAT ===
+Return JSON with 3-4 segments:
+
 {
-  "title": "Episode title",
-  "script": "Full podcast script",
-  "mentionedHandles": ["@handle1", "@handle2", ...],
-  "relatedTweetIds": ["id1", "id2", ...] // IDs of tweets you discussed (for show notes)
-}`;
+  "title": "Catchy 3-6 word title",
+  "segments": [
+    {
+      "segmentId": "intro",
+      "segmentType": "intro", 
+      "text": "Hey everyone, welcome back to Grokcast! [1-2 sentences setting the vibe]. ...",
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "segmentType": "theme",
+      "themeTitle": "The Big Picture Theme",
+      "text": "[Talk about the PATTERN you see. What's the story? Why does it matter? Give your take. 4-6 sentences. Don't list names.]",
+      "tweetIds": ["id1", "id2", "id3"]
+    },
+    {
+      "segmentId": "theme_2", 
+      "segmentType": "theme",
+      "themeTitle": "Another Angle",
+      "text": "[Another theme or insight. What's interesting or surprising? Your synthesis. 4-6 sentences.]",
+      "tweetIds": ["id4", "id5"]
+    },
+    {
+      "segmentId": "wrapup",
+      "segmentType": "wrapup",
+      "text": "So what's the takeaway? [Your big insight in 1-2 sentences]. That's Grokcast. Catch you next time!",
+      "tweetIds": []
+    }
+  ],
+  "mentionedHandles": []
+}
+
+Remember: The listener should walk away with 2-3 BIG IDEAS, not a list of 10 people they've never heard of.`;
 
   const userPrompt = `Topic: "${topicTitle}"
 Number of tweets: ${posts.length}
-Handles in this topic: ${handles.slice(0, 15).join(', ')}
+
+HANDLE TO NAME MAPPING (use these names, not @handles):
+${handleMappings || 'Use descriptive references like "one user" if no names available'}
 
 Tweets to discuss:
 ${postsText}`;
 
   try {
+    console.log(`Generating segmented podcast script for "${topicTitle}" (${posts.length} posts)...`);
+    
     const response = await grokStrong(
       [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       {
-        temperature: 0.7, // Higher for more creative output
+        temperature: 0.7,
         response_format: { type: 'json_object' },
       }
     );
 
-    const parsed = parseJsonResponse<PodcastResponse>(response.content);
+    const parsed = parseJsonResponse<{
+      title: string;
+      segments: PodcastSegment[];
+      mentionedHandles: string[];
+    }>(response.content);
     
-    // Validate related IDs
-    const validRelated = parsed.relatedTweetIds.filter(id => validIds.has(id));
+    // Validate and collect all tweet IDs (cap at 3 per segment for better UX)
+    const allTweetIds: string[] = [];
+    const validatedSegments = parsed.segments.map(seg => {
+      const validTweetIds = seg.tweetIds
+        .filter(id => validIds.has(id))
+        .slice(0, 3); // Cap at 3 tweets per segment
+      allTweetIds.push(...validTweetIds);
+      return {
+        ...seg,
+        tweetIds: validTweetIds,
+      };
+    });
     
-    const output = `# 🎙️ Grokcast: ${parsed.title}\n\n${parsed.script}`;
+    // Build full script text for display
+    const fullScriptText = validatedSegments.map(seg => seg.text).join('\n\n');
+    const output = `# 🎙️ Grokcast: ${parsed.title}\n\n${fullScriptText}`;
 
-    return {
+    const segmentedScript: SegmentedPodcastScript = {
+      title: parsed.title,
+      segments: validatedSegments,
+      mentionedHandles: parsed.mentionedHandles || [],
+      allTweetIds: [...new Set(allTweetIds)],
+    };
+
+    const actionResult: ActionResult = {
       id: uuidv4(),
       topicSpaceId: '',
       actionType: 'podcast',
       output,
       createdAt: new Date().toISOString(),
-      groundedPostIds: validRelated,
+      groundedPostIds: segmentedScript.allTweetIds,
     };
+
+    console.log(`Podcast script generated: ${validatedSegments.length} segments, ${segmentedScript.allTweetIds.length} tweets referenced`);
+
+    return { actionResult, segmentedScript };
   } catch (error) {
     console.error('Error generating podcast script:', error);
     throw new Error('Failed to generate podcast script');
@@ -292,5 +376,99 @@ ${postsText}`;
   } catch (error) {
     console.error('Error answering question:', error);
     throw new Error('Failed to answer question');
+  }
+}
+
+/**
+ * Thread response from Grok
+ */
+interface ThreadResponse {
+  title: string;
+  tweets: string[];        // Array of tweets, each ≤280 chars
+  relatedTweetIds: string[];
+}
+
+/**
+ * Generate a Twitter/X thread for a Topic Space
+ */
+export async function generateThread(
+  topicTitle: string,
+  posts: Post[]
+): Promise<ActionResult> {
+  const postsText = formatPostsForPrompt(posts, 25);
+  const validIds = getValidTweetIds(posts);
+  
+  // Collect handles for reference
+  const handles = [...new Set(posts.map(p => `@${p.authorUsername}`))];
+  
+  const systemPrompt = `You are a skilled Twitter/X content creator. Create an engaging thread that summarizes and synthesizes discussions on a topic.
+
+THREAD RULES:
+- First tweet should hook readers and introduce the topic (use an emoji or two)
+- Each tweet MUST be 280 characters or less (this is critical!)
+- Use 5-10 tweets total
+- Number tweets like "1/" "2/" etc. at the start
+- Reference @handles naturally when crediting ideas
+- End with a call to action or thought-provoking question
+- Make it shareable and engaging
+- Don't use hashtags excessively (max 1-2 per tweet)
+
+STYLE:
+- Be concise but insightful
+- Use line breaks within tweets for readability
+- Include key takeaways and interesting findings
+- Credit original authors when mentioning their specific ideas
+
+Return JSON:
+{
+  "title": "Thread title (not a tweet)",
+  "tweets": ["1/ First tweet...", "2/ Second tweet...", ...],
+  "relatedTweetIds": ["id1", "id2", ...] // IDs of tweets you synthesized
+}`;
+
+  const userPrompt = `Topic: "${topicTitle}"
+Number of source tweets: ${posts.length}
+Key voices: ${handles.slice(0, 10).join(', ')}
+
+Source tweets to synthesize:
+${postsText}`;
+
+  try {
+    const response = await grokStrong(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      {
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+      }
+    );
+
+    const parsed = parseJsonResponse<ThreadResponse>(response.content);
+    
+    // Validate related IDs
+    const validRelated = parsed.relatedTweetIds.filter(id => validIds.has(id));
+    
+    // Format output with numbered tweets
+    const formattedTweets = parsed.tweets.map((tweet, i) => {
+      const charCount = tweet.length;
+      const warning = charCount > 280 ? ` ⚠️ (${charCount} chars)` : '';
+      return `${tweet}${warning}`;
+    }).join('\n\n---\n\n');
+    
+    const output = `# 🧵 ${parsed.title}\n\n${formattedTweets}`;
+
+    return {
+      id: uuidv4(),
+      topicSpaceId: '',
+      actionType: 'thread',
+      output,
+      createdAt: new Date().toISOString(),
+      groundedPostIds: validRelated,
+    };
+  } catch (error) {
+    console.error('Error generating thread:', error);
+    throw new Error('Failed to generate thread');
   }
 }
