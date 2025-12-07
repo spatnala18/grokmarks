@@ -1,0 +1,44 @@
+{
+  "totalDuration": 54.068999999999996,
+  "entries": [
+    {
+      "segmentId": "intro",
+      "startTime": 0,
+      "endTime": 9.41925,
+      "duration": 9.41925,
+      "tweetIds": []
+    },
+    {
+      "segmentId": "theme_1",
+      "startTime": 9.41925,
+      "endTime": 26.566499999999998,
+      "duration": 17.14725,
+      "tweetIds": [
+        "1995196912052715561",
+        "1995547244431647199",
+        "1995572419218796567"
+      ],
+      "themeTitle": "Hiring Gold Rush"
+    },
+    {
+      "segmentId": "theme_2",
+      "startTime": 26.566499999999998,
+      "endTime": 45.321749999999994,
+      "duration": 18.75525,
+      "tweetIds": [
+        "1995242558117847404",
+        "1995902801604669825",
+        "1996367349700853863"
+      ],
+      "themeTitle": "Drama and Deep Cuts"
+    },
+    {
+      "segmentId": "wrapup",
+      "startTime": 45.321749999999994,
+      "endTime": 54.068999999999996,
+      "duration": 8.74725,
+      "tweetIds": []
+    }
+  ],
+  "generatedAt": "2025-12-07T16:37:38.278Z"
+}

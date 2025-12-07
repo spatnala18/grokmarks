@@ -324,7 +324,8 @@ function AppContent() {
   };
 
   const handleRefreshTopic = useCallback(() => {
-    handleSync();
+    // Open sync dialog for refresh
+    setShowSyncDialog(true);
   }, []);
 
   // Loading state
@@ -361,37 +362,33 @@ function AppContent() {
         <CenterPanel
           topic={selectedTopic}
           qaHistory={qaHistory}
+          briefing={briefing}
           isLoadingTopic={isLoadingTopic}
           isAskingQuestion={isAskingQuestion}
+          isGeneratingBriefing={isGeneratingBriefing}
           onAskQuestion={handleAskQuestion}
+          onGenerateBriefing={handleGenerateBriefing}
           highlightedTweetIds={highlightedTweetIds}
           grokcastMode={grokcastMode}
           currentSegment={currentSegment}
           segmentedScript={segmentedScript}
           onExitGrokcast={handleExitGrokcast}
-        />
-        <RightPanel
-          topic={selectedTopic}
-          qaHistory={qaHistory}
-          briefing={briefing}
+          // Podcast/Grokcast props
           podcast={podcast}
           podcastAudio={podcastAudio}
-          thread={thread}
-          isGeneratingBriefing={isGeneratingBriefing}
           isGeneratingPodcast={isGeneratingPodcast}
           isGeneratingPodcastAudio={isGeneratingPodcastAudio}
-          isGeneratingThread={isGeneratingThread}
-          isAskingQuestion={isAskingQuestion}
-          onGenerateBriefing={handleGenerateBriefing}
           onGeneratePodcast={handleGeneratePodcast}
           onGeneratePodcastAudio={handleGeneratePodcastAudio}
-          onGenerateThread={handleGenerateThread}
-          onRefreshTopic={handleRefreshTopic}
-          onAskQuestion={handleAskQuestion}
           onHighlightTweets={setHighlightedTweetIds}
           onSegmentChange={handleSegmentChange}
           onGrokcastStart={handleGrokcastStart}
           onGrokcastEnd={handleGrokcastEnd}
+        />
+        <RightPanel
+          topic={selectedTopic}
+          onRefreshTopic={handleRefreshTopic}
+          highlightedTweetIds={highlightedTweetIds}
         />
       </div>
       
