@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar';
 import { CenterPanel } from './components/CenterPanel';
 import { RightPanel } from './components/RightPanel';
 import { LoginPage } from './components/LoginPage';
+import { SyncDialog } from './components/SyncDialog';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { authApi, syncApi, topicsApi } from './api';
 import type { 
@@ -18,6 +19,7 @@ import type {
   PodcastAudio,
   SegmentedPodcastScript,
   TimelineEntry,
+  TopicType,
 } from './types';
 import './App.css';
 
@@ -35,6 +37,7 @@ function AppContent() {
 
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showSyncDialog, setShowSyncDialog] = useState(false);
 
   // Actions state
   const [qaHistory, setQaHistory] = useState<ActionResult[]>([]);
@@ -130,13 +133,25 @@ function AppContent() {
     }
   };
 
-  const handleSync = async () => {
+  // Open sync dialog instead of syncing directly
+  const handleOpenSyncDialog = () => {
+    setShowSyncDialog(true);
+  };
+
+  // Handle actual sync with topic type
+  const handleSync = async (topicType: TopicType, customTopicNames: string[]) => {
     setIsSyncing(true);
     try {
-      const response = await syncApi.sync(50, 30, true);
+      const response = await syncApi.sync({
+        maxBookmarks: 50,
+        classify: true,
+        topicType,
+        customTopicNames,
+      });
       if (response.success && response.data) {
         setTopics(response.data.topicSpaces);
-        showToast('success', `Synced ${response.data.totalPosts || 0} posts into ${response.data.topicSpaces.length} topics`);
+        showToast('success', `Synced ${response.data.totalPosts || 0} bookmarks into ${response.data.topicSpaces.length} topics`);
+        setShowSyncDialog(false);
         // Refresh selected topic if we have one
         if (selectedTopic) {
           const updated = response.data.topicSpaces.find(t => t.id === selectedTopic.id);
@@ -333,7 +348,7 @@ function AppContent() {
       <TopNav
         user={user}
         isSyncing={isSyncing}
-        onSync={handleSync}
+        onSync={handleOpenSyncDialog}
         onLogout={handleLogout}
       />
       <div className="app-content">
@@ -379,6 +394,14 @@ function AppContent() {
           onGrokcastEnd={handleGrokcastEnd}
         />
       </div>
+      
+      {/* Sync Dialog */}
+      <SyncDialog
+        isOpen={showSyncDialog}
+        onClose={() => setShowSyncDialog(false)}
+        onSync={handleSync}
+        isSyncing={isSyncing}
+      />
     </div>
   );
 }

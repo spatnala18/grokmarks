@@ -12,6 +12,7 @@ import type {
   PodcastScriptResponse,
   PodcastAudio,
   SegmentedPodcastScript,
+  TopicType,
 } from './types';
 
 const API_BASE = 'http://localhost:8000';
@@ -47,12 +48,22 @@ export const authApi = {
 };
 
 // Sync
+export interface SyncOptions {
+  maxBookmarks?: number;
+  classify?: boolean;
+  topicType?: TopicType;
+  customTopicNames?: string[];
+}
+
 export const syncApi = {
-  sync: (maxBookmarks = 50, maxTimeline = 30, classify = true) =>
-    fetchApi<SyncResult>(
+  sync: (options: SyncOptions = {}) => {
+    const { maxBookmarks = 50, classify = true, topicType = 'auto', customTopicNames = [] } = options;
+    return fetchApi<SyncResult>(
       'POST',
-      `/api/x/sync?maxBookmarks=${maxBookmarks}&maxTimeline=${maxTimeline}&classify=${classify}`
-    ),
+      `/api/x/sync?maxBookmarks=${maxBookmarks}&classify=${classify}`,
+      { topicType, customTopicNames }
+    );
+  },
 };
 
 // Topics

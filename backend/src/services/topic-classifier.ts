@@ -122,6 +122,9 @@ export async function classifyPosts(
   let grokCalls = 0;
   const batchSize = HYPERPARAMS.CLASSIFICATION_BATCH_SIZE;
 
+  // Collect all classifications first
+  const allClassifications: Array<{ post: Post; topics: string[]; summary: string }> = [];
+
   for (let i = 0; i < postsToClassify.length; i += batchSize) {
     const batch = postsToClassify.slice(i, i + batchSize);
     const batchNum = Math.floor(i / batchSize) + 1;
@@ -132,41 +135,24 @@ export async function classifyPosts(
       const batchResults = await classifyBatch(batch, options);
       grokCalls++;
       
-      // Process results and cache them (cache only for auto topics)
-      const cacheEntries: Array<{ postId: string; text: string; topicLabel: string; summary: string }> = [];
-      
       for (const post of batch) {
         const classification = batchResults.find(c => c.id === post.id);
         
         if (classification && classification.topics.length > 0) {
-          classifiedPosts.push({
-            ...post,
-            topicLabels: classification.topics,
+          allClassifications.push({
+            post,
+            topics: classification.topics,
             summary: classification.summary,
           });
-          
-          // Cache only the primary topic for auto-discovered topics
-          if (options.topicType === 'auto') {
-            cacheEntries.push({
-              postId: post.id,
-              text: post.text,
-              topicLabel: classification.topics[0], // Primary topic
-              summary: classification.summary,
-            });
-          }
         } else {
           // Classification failed for this post
-          classifiedPosts.push({
-            ...post,
-            topicLabels: ['Uncategorized'],
+          const fallbackTopic = options.topicType === 'custom' ? 'Miscellaneous' : 'Uncategorized';
+          allClassifications.push({
+            post,
+            topics: [fallbackTopic],
             summary: post.text.slice(0, 100) + (post.text.length > 100 ? '...' : ''),
           });
         }
-      }
-      
-      // Batch cache the results (only for auto topics)
-      if (options.topicType === 'auto' && cacheEntries.length > 0) {
-        classificationCache.setMany(xUserId, cacheEntries);
       }
       
     } catch (error) {
@@ -174,14 +160,70 @@ export async function classifyPosts(
       grokCalls++;
       
       // On error, add posts with default values
+      const fallbackTopic = options.topicType === 'custom' ? 'Miscellaneous' : 'Uncategorized';
       for (const post of batch) {
-        classifiedPosts.push({
-          ...post,
-          topicLabels: ['Uncategorized'],
+        allClassifications.push({
+          post,
+          topics: [fallbackTopic],
           summary: post.text.slice(0, 100) + (post.text.length > 100 ? '...' : ''),
         });
       }
     }
+  }
+
+  // Step 2b: For custom topics, map AI-generated labels to exact user-provided names
+  let topicMapping: Map<string, string> | null = null;
+  if (options.topicType === 'custom' && options.customTopicNames && options.customTopicNames.length > 0) {
+    // Collect all unique AI-generated topic names
+    const aiGeneratedTopics = new Set<string>();
+    for (const c of allClassifications) {
+      for (const topic of c.topics) {
+        aiGeneratedTopics.add(topic);
+      }
+    }
+    
+    // Call LLM to map AI topics to user topics
+    topicMapping = await mapTopicsToUserNames(
+      Array.from(aiGeneratedTopics),
+      options.customTopicNames
+    );
+    grokCalls++;
+    
+    console.log(`  Topic mapping:`);
+    for (const [ai, user] of topicMapping) {
+      console.log(`    "${ai}" → "${user}"`);
+    }
+  }
+
+  // Step 2c: Apply mapping and build final classified posts
+  const cacheEntries: Array<{ postId: string; text: string; topicLabel: string; summary: string }> = [];
+  
+  for (const { post, topics, summary } of allClassifications) {
+    // Apply topic mapping if available
+    const finalTopics = topicMapping
+      ? topics.map(t => topicMapping!.get(t) || 'Miscellaneous')
+      : topics;
+    
+    classifiedPosts.push({
+      ...post,
+      topicLabels: finalTopics,
+      summary,
+    });
+    
+    // Cache only for auto topics
+    if (options.topicType === 'auto') {
+      cacheEntries.push({
+        postId: post.id,
+        text: post.text,
+        topicLabel: finalTopics[0],
+        summary,
+      });
+    }
+  }
+  
+  // Batch cache the results (only for auto topics)
+  if (options.topicType === 'auto' && cacheEntries.length > 0) {
+    classificationCache.setMany(xUserId, cacheEntries);
   }
 
   return {
@@ -212,24 +254,26 @@ async function classifyBatch(
   
   if (options.topicType === 'custom' && options.customTopicNames && options.customTopicNames.length > 0) {
     // Custom topics: classify into user-provided categories
-    const topicsList = options.customTopicNames.join(', ');
+    const topicsList = options.customTopicNames.map((t, i) => `${i + 1}. "${t}"`).join('\n');
     systemPrompt = `You are a tweet classifier. Your job is to:
-1. Assign each tweet to ONE OR MORE of these user-defined topics: ${topicsList}
+1. Assign each tweet to ONE of these EXACT user-defined topics:
+${topicsList}
+${options.customTopicNames.length + 1}. "Miscellaneous"
+
 2. Write a 1-2 sentence summary of each tweet
 
-Guidelines:
-- You MUST use ONLY the provided topic names exactly as written
+CRITICAL RULES:
+- You MUST use the EXACT topic names as listed above - do not modify, rephrase, or abbreviate them
+- Use the topic name EXACTLY as written in quotes (e.g., "${options.customTopicNames[0]}" not a variation)
+- If a tweet doesn't clearly fit any of the provided topics, use exactly "Miscellaneous"
 - Most tweets should go to exactly ONE topic
-- Only assign multiple topics if the tweet genuinely fits multiple categories
-- If a tweet doesn't fit any topic well, assign it to the closest match
 - Summaries should capture the key point, not just repeat the tweet
-- Base everything ONLY on the tweet content provided
 
 Return your response as JSON with this exact structure:
 {
   "classifications": [
-    { "id": "tweet_id", "topics": ["Topic Name"], "summary": "Brief summary" },
-    { "id": "tweet_id2", "topics": ["Topic A", "Topic B"], "summary": "Brief summary" },
+    { "id": "tweet_id", "topics": ["${options.customTopicNames[0]}"], "summary": "Brief summary" },
+    { "id": "tweet_id2", "topics": ["Miscellaneous"], "summary": "Brief summary" },
     ...
   ]
 }`;
@@ -272,6 +316,92 @@ Return your response as JSON with this exact structure:
 
   const parsed = parseJsonResponse<ClassificationResponse>(response.content);
   return parsed.classifications;
+}
+
+/**
+ * Map AI-generated topic names to exact user-provided topic names
+ * Uses a fast LLM call to do semantic matching
+ */
+async function mapTopicsToUserNames(
+  aiTopics: string[],
+  userTopics: string[]
+): Promise<Map<string, string>> {
+  const mapping = new Map<string, string>();
+  
+  // If no AI topics, return empty mapping
+  if (aiTopics.length === 0) return mapping;
+  
+  // Build the valid topics list (user topics + Miscellaneous)
+  const validTopics = [...userTopics, 'Miscellaneous'];
+  
+  const systemPrompt = `You are a topic name mapper. Your job is to map AI-generated topic names to the EXACT user-provided topic names.
+
+The user provided these EXACT topic names (use these EXACTLY as written):
+${userTopics.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+${userTopics.length + 1}. "Miscellaneous" (for topics that don't match any of the above)
+
+For each AI-generated topic, output the EXACT matching user topic name from the list above.
+If an AI topic doesn't clearly match any user topic, map it to "Miscellaneous".
+
+Return JSON with this exact structure:
+{
+  "mappings": [
+    { "ai_topic": "AI generated name", "user_topic": "Exact User Topic Name" },
+    ...
+  ]
+}`;
+
+  const userPrompt = `Map these AI-generated topic names to the exact user topic names:
+
+AI-generated topics:
+${aiTopics.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+
+Remember: Output must use EXACT user topic names from the list, or "Miscellaneous".`;
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ];
+
+  try {
+    const response = await grokFast(messages, {
+      temperature: 0, // Deterministic for mapping
+      response_format: { type: 'json_object' },
+    });
+
+    console.log(`  Topic mapping LLM call: ${response.usage.total_tokens} tokens`);
+
+    interface MappingResponse {
+      mappings: Array<{ ai_topic: string; user_topic: string }>;
+    }
+
+    const parsed = parseJsonResponse<MappingResponse>(response.content);
+    
+    // Build the mapping, ensuring only valid topics are used
+    for (const { ai_topic, user_topic } of parsed.mappings) {
+      // Verify the user_topic is in our valid list (case-insensitive check)
+      const matchedTopic = validTopics.find(
+        t => t.toLowerCase() === user_topic.toLowerCase()
+      );
+      mapping.set(ai_topic, matchedTopic || 'Miscellaneous');
+    }
+    
+    // Ensure all AI topics have a mapping
+    for (const aiTopic of aiTopics) {
+      if (!mapping.has(aiTopic)) {
+        mapping.set(aiTopic, 'Miscellaneous');
+      }
+    }
+    
+  } catch (error) {
+    console.error('  Error in topic mapping:', error);
+    // Fallback: map everything to Miscellaneous
+    for (const aiTopic of aiTopics) {
+      mapping.set(aiTopic, 'Miscellaneous');
+    }
+  }
+  
+  return mapping;
 }
 
 /**
@@ -422,15 +552,19 @@ export async function createTopicSpaces(
   const topicSpaces: TopicSpace[] = [];
   let grokCalls = 0;
 
+  // For custom topics we must preserve the exact user-provided names.
+  // Disable LLM-based title/description generation so titles stay untouched.
+  const allowGeneratedDescriptions = generateDescriptions && topicType !== 'custom';
+
   // Sort topics by number of posts (descending)
   const sortedTopics = Array.from(topicGroups.entries())
     .sort((a, b) => b[1].length - a[1].length);
 
   for (const [topicLabel, topicPosts] of sortedTopics) {
     let title = topicLabel;
-    let description = `${topicPosts.length} posts about ${topicLabel.toLowerCase()}`;
+    let description = `${topicPosts.length} posts about ${topicLabel}`;
 
-    if (generateDescriptions) {
+    if (allowGeneratedDescriptions) {
       try {
         const info = await generateTopicInfo(topicLabel, topicPosts);
         title = info.title;

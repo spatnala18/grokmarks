@@ -1,9 +1,9 @@
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware, requireAuth } from './auth';
 import { getAllBookmarks, getTimelinePosts } from '../services/x-api';
-import { classifyAndCreateTopicSpaces } from '../services/topic-classifier';
+import { classifyAndCreateTopicSpaces, createCustomTopicSpaces } from '../services/topic-classifier';
 import { store } from '../store/index';
-import { Post } from '../types';
+import { Post, TopicType } from '../types';
 
 const router = Router();
 
@@ -13,21 +13,38 @@ router.use(authMiddleware);
 /**
  * POST /api/x/sync
  * 
- * Fetches bookmarks from X API and optionally classifies them into Topic Spaces using Grok.
- * Note: Timeline posts are NOT fetched for classification - only bookmarks are used for topics.
+ * Fetches bookmarks from X API and classifies them into Topic Spaces using Grok.
+ * Supports both auto-discovery and custom topic modes.
  * 
  * Query params:
  * - maxBookmarks: Max bookmarks to fetch (default 200)
  * - classify: Whether to run Grok classification (default true)
+ * 
+ * Body (optional):
+ * - topicType: 'auto' | 'custom' (default 'auto')
+ * - customTopicNames: string[] (required if topicType is 'custom')
  */
 router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const session = req.session!;
   
   const maxBookmarks = parseInt(req.query.maxBookmarks as string) || 200;
   const shouldClassify = req.query.classify !== 'false';
+  
+  // Get topic classification options from body
+  const topicType: TopicType = req.body?.topicType || 'auto';
+  const customTopicNames: string[] = req.body?.customTopicNames || [];
 
   console.log(`Starting sync for @${session.xUsername}...`);
   console.log(`  Max bookmarks: ${maxBookmarks}, Classify: ${shouldClassify}`);
+  console.log(`  Topic type: ${topicType}, Custom topics: ${customTopicNames.join(', ') || 'none'}`);
+
+  // Validate custom topics if that mode is selected
+  if (topicType === 'custom' && customTopicNames.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Custom topic names are required when topicType is "custom"',
+    });
+  }
 
   try {
     const results: {
@@ -74,8 +91,22 @@ router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Respons
     let classificationStats: any = null;
     if (shouldClassify && results.bookmarks.length > 0) {
       try {
-        console.log('Running Grok classification on bookmarks...');
-        const classified = await classifyAndCreateTopicSpaces(results.bookmarks, session.xUserId);
+        console.log(`Running Grok classification on bookmarks (mode: ${topicType})...`);
+        
+        let classified;
+        if (topicType === 'custom') {
+          // Use custom topics mode
+          classified = await createCustomTopicSpaces(
+            results.bookmarks,
+            session.xUserId,
+            customTopicNames
+          );
+        } else {
+          // Use auto-discovery mode
+          classified = await classifyAndCreateTopicSpaces(results.bookmarks, session.xUserId, {
+            topicType: 'auto',
+          });
+        }
         
         // Update posts with classification results
         store.savePosts(session.xUserId, classified.posts);
