@@ -169,10 +169,20 @@ class MemoryStore {
     const data = this.userData.get(xUserId);
     const ts = data?.topicSpaces.get(topicSpaceId);
     if (ts) {
-      const newPostIds = postIds.filter(id => !ts.postIds.includes(id));
-      ts.postIds = [...ts.postIds, ...newPostIds];
+      const newPostIds = postIds.filter(id => !ts.bookmarkTweetIds.includes(id));
+      ts.bookmarkTweetIds = [...ts.bookmarkTweetIds, ...newPostIds];
       ts.newPostCount += newPostIds.length;
       ts.updatedAt = new Date().toISOString();
+      
+      // Update lastBookmarkTime if we have new posts
+      if (newPostIds.length > 0) {
+        const posts = this.getPostsByIds(xUserId, newPostIds);
+        const maxTime = posts.reduce((max, p) => {
+          const t = new Date(p.createdAt).getTime();
+          return t > max ? t : max;
+        }, new Date(ts.lastBookmarkTime).getTime());
+        ts.lastBookmarkTime = new Date(maxTime).toISOString();
+      }
     }
   }
 

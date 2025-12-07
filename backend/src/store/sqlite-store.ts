@@ -78,7 +78,8 @@ class SQLiteStore {
         url TEXT NOT NULL,
         source TEXT NOT NULL,
         summary TEXT,
-        topic_label TEXT,
+        topic_labels TEXT,
+        public_metrics TEXT,
         PRIMARY KEY (id, x_user_id)
       )
     `);
@@ -91,10 +92,12 @@ class SQLiteStore {
         x_user_id TEXT NOT NULL,
         title TEXT NOT NULL,
         description TEXT NOT NULL,
-        post_ids TEXT NOT NULL,
+        bookmark_tweet_ids TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'auto',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         new_post_count INTEGER DEFAULT 0,
+        last_bookmark_time TEXT,
         PRIMARY KEY (id, x_user_id)
       )
     `);
@@ -221,8 +224,8 @@ class SQLiteStore {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO posts (
         id, x_user_id, text, author_id, author_username, author_display_name,
-        author_profile_image_url, created_at, url, source, summary, topic_label
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        author_profile_image_url, created_at, url, source, summary, topic_labels, public_metrics
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertMany = this.db.transaction((posts: Post[]) => {
@@ -239,7 +242,8 @@ class SQLiteStore {
           post.url,
           post.source,
           post.summary || null,
-          post.topicLabel || null
+          post.topicLabels ? JSON.stringify(post.topicLabels) : null,
+          post.publicMetrics ? JSON.stringify(post.publicMetrics) : null
         );
       }
     });
@@ -286,7 +290,8 @@ class SQLiteStore {
       url: row.url,
       source: row.source as Post['source'],
       summary: row.summary || undefined,
-      topicLabel: row.topic_label || undefined,
+      topicLabels: row.topic_labels ? JSON.parse(row.topic_labels) : undefined,
+      publicMetrics: row.public_metrics ? JSON.parse(row.public_metrics) : undefined,
     };
   }
 
@@ -297,8 +302,8 @@ class SQLiteStore {
   saveTopicSpaces(xUserId: string, topicSpaces: TopicSpace[]): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO topic_spaces (
-        id, x_user_id, title, description, post_ids, created_at, updated_at, new_post_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, x_user_id, title, description, bookmark_tweet_ids, type, created_at, updated_at, new_post_count, last_bookmark_time
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertMany = this.db.transaction((topicSpaces: TopicSpace[]) => {
@@ -308,10 +313,12 @@ class SQLiteStore {
           xUserId,
           ts.title,
           ts.description,
-          JSON.stringify(ts.postIds),
+          JSON.stringify(ts.bookmarkTweetIds),
+          ts.type,
           ts.createdAt,
           ts.updatedAt,
-          ts.newPostCount
+          ts.newPostCount,
+          ts.lastBookmarkTime || null
         );
       }
     });
@@ -339,8 +346,8 @@ class SQLiteStore {
   addPostsToTopicSpace(xUserId: string, topicSpaceId: string, postIds: string[]): void {
     const ts = this.getTopicSpace(xUserId, topicSpaceId);
     if (ts) {
-      const newPostIds = postIds.filter(id => !ts.postIds.includes(id));
-      ts.postIds = [...ts.postIds, ...newPostIds];
+      const newPostIds = postIds.filter(id => !ts.bookmarkTweetIds.includes(id));
+      ts.bookmarkTweetIds = [...ts.bookmarkTweetIds, ...newPostIds];
       ts.newPostCount += newPostIds.length;
       ts.updatedAt = new Date().toISOString();
       this.saveTopicSpaces(xUserId, [ts]);
@@ -356,10 +363,12 @@ class SQLiteStore {
       id: row.id,
       title: row.title,
       description: row.description,
-      postIds: JSON.parse(row.post_ids),
+      bookmarkTweetIds: JSON.parse(row.bookmark_tweet_ids),
+      type: row.type as TopicSpace['type'],
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       newPostCount: row.new_post_count,
+      lastBookmarkTime: row.last_bookmark_time || undefined,
     };
   }
 

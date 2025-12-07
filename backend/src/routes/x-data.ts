@@ -13,36 +13,32 @@ router.use(authMiddleware);
 /**
  * POST /api/x/sync
  * 
- * Fetches bookmarks and timeline posts from X API.
- * Optionally classifies them into Topic Spaces using Grok.
+ * Fetches bookmarks from X API and optionally classifies them into Topic Spaces using Grok.
+ * Note: Timeline posts are NOT fetched for classification - only bookmarks are used for topics.
  * 
  * Query params:
  * - maxBookmarks: Max bookmarks to fetch (default 200)
- * - maxTimeline: Max timeline posts to fetch (default 100)
  * - classify: Whether to run Grok classification (default true)
  */
 router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const session = req.session!;
   
   const maxBookmarks = parseInt(req.query.maxBookmarks as string) || 200;
-  const maxTimeline = parseInt(req.query.maxTimeline as string) || 100;
   const shouldClassify = req.query.classify !== 'false';
 
   console.log(`Starting sync for @${session.xUsername}...`);
-  console.log(`  Max bookmarks: ${maxBookmarks}, Max timeline: ${maxTimeline}, Classify: ${shouldClassify}`);
+  console.log(`  Max bookmarks: ${maxBookmarks}, Classify: ${shouldClassify}`);
 
   try {
     const results: {
       bookmarks: Post[];
-      timeline: Post[];
       errors: string[];
     } = {
       bookmarks: [],
-      timeline: [],
       errors: [],
     };
 
-    // Fetch bookmarks
+    // Fetch bookmarks only
     try {
       console.log('Fetching bookmarks...');
       const bookmarkResult = await getAllBookmarks(
@@ -61,63 +57,25 @@ router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Respons
       results.errors.push(`Bookmarks: ${error.message}`);
     }
 
-    // Fetch timeline
-    try {
-      console.log('Fetching timeline...');
-      const timelineResult = await getTimelinePosts(
-        session.xUserId,
-        session.accessToken,
-        session.timelineSinceId, // Use stored cursor if available
-        maxTimeline
-      );
-      results.timeline = timelineResult.posts;
-      console.log(`  Fetched ${results.timeline.length} timeline posts`);
-
-      // Update the since_id for next refresh
-      if (timelineResult.newestId) {
-        store.updateSession(session.sessionId, {
-          timelineSinceId: timelineResult.newestId,
-          lastSyncAt: new Date().toISOString(),
-        });
-      }
-
-      if (timelineResult.rateLimitInfo) {
-        console.log(`  Rate limit: ${timelineResult.rateLimitInfo.remaining}/${timelineResult.rateLimitInfo.limit}`);
-      }
-    } catch (error: any) {
-      console.error('Error fetching timeline:', error.message);
-      results.errors.push(`Timeline: ${error.message}`);
+    // Store posts in memory (only bookmarks now)
+    if (results.bookmarks.length > 0) {
+      store.savePosts(session.xUserId, results.bookmarks);
     }
 
-    // Combine all posts (dedupe by ID)
-    const allPostsMap = new Map<string, Post>();
-    
-    for (const post of results.bookmarks) {
-      allPostsMap.set(post.id, post);
-    }
-    
-    for (const post of results.timeline) {
-      // If post already exists (from bookmarks), keep the bookmark version
-      // but note it's also in timeline
-      if (!allPostsMap.has(post.id)) {
-        allPostsMap.set(post.id, post);
-      }
-    }
+    console.log(`Fetched ${results.bookmarks.length} bookmarks`);
 
-    const allPosts = Array.from(allPostsMap.values());
-
-    // Store raw posts in memory
-    store.savePosts(session.xUserId, allPosts);
-
-    console.log(`Fetched ${allPosts.length} unique posts`);
+    // Update last sync time
+    store.updateSession(session.sessionId, {
+      lastSyncAt: new Date().toISOString(),
+    });
 
     // Run classification if requested
     let topicSpaces: any[] = [];
     let classificationStats: any = null;
-    if (shouldClassify && allPosts.length > 0) {
+    if (shouldClassify && results.bookmarks.length > 0) {
       try {
-        console.log('Running Grok classification...');
-        const classified = await classifyAndCreateTopicSpaces(allPosts, session.xUserId);
+        console.log('Running Grok classification on bookmarks...');
+        const classified = await classifyAndCreateTopicSpaces(results.bookmarks, session.xUserId);
         
         // Update posts with classification results
         store.savePosts(session.xUserId, classified.posts);
@@ -140,15 +98,16 @@ router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Respons
     res.json({
       success: true,
       data: {
-        totalPosts: allPosts.length,
+        totalPosts: results.bookmarks.length,
         bookmarksCount: results.bookmarks.length,
-        timelineCount: results.timeline.length,
         topicSpacesCount: topicSpaces.length,
         topicSpaces: topicSpaces.map(ts => ({
           id: ts.id,
           title: ts.title,
           description: ts.description,
-          postCount: ts.postIds.length,
+          type: ts.type,
+          postCount: ts.bookmarkTweetIds.length,
+          lastBookmarkTime: ts.lastBookmarkTime,
         })),
         classificationStats: classificationStats || undefined,
         errors: results.errors.length > 0 ? results.errors : undefined,
@@ -166,46 +125,17 @@ router.post('/sync', requireAuth, async (req: AuthenticatedRequest, res: Respons
 /**
  * POST /api/x/refresh
  * 
- * Fetches only NEW posts since last sync.
- * Uses stored cursors/since_id to fetch incrementally.
+ * Fetches only NEW bookmarks since last sync.
+ * Finds bookmarks that don't already exist in store.
  */
 router.post('/refresh', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const session = req.session!;
 
-  console.log(`Refreshing data for @${session.xUsername}...`);
+  console.log(`Refreshing bookmarks for @${session.xUsername}...`);
 
   try {
-    const newPosts: Post[] = [];
     const errors: string[] = [];
-
-    // Fetch new timeline posts using since_id
-    if (session.timelineSinceId) {
-      try {
-        console.log(`Fetching timeline posts since ${session.timelineSinceId}...`);
-        const timelineResult = await getTimelinePosts(
-          session.xUserId,
-          session.accessToken,
-          session.timelineSinceId,
-          100
-        );
-
-        newPosts.push(...timelineResult.posts);
-        console.log(`  Fetched ${timelineResult.posts.length} new timeline posts`);
-
-        // Update the since_id
-        if (timelineResult.newestId) {
-          store.updateSession(session.sessionId, {
-            timelineSinceId: timelineResult.newestId,
-            lastSyncAt: new Date().toISOString(),
-          });
-        }
-      } catch (error: any) {
-        console.error('Error refreshing timeline:', error.message);
-        errors.push(`Timeline: ${error.message}`);
-      }
-    } else {
-      console.log('No previous sync - run full sync first');
-    }
+    let newBookmarks: Post[] = [];
 
     // Fetch latest bookmarks (first page only for refresh)
     try {
@@ -220,26 +150,30 @@ router.post('/refresh', requireAuth, async (req: AuthenticatedRequest, res: Resp
       const existingPosts = store.getAllPosts(session.xUserId);
       const existingIds = new Set(existingPosts.map(p => p.id));
       
-      const newBookmarks = bookmarkResult.posts.filter(p => !existingIds.has(p.id));
-      newPosts.push(...newBookmarks);
+      newBookmarks = bookmarkResult.posts.filter(p => !existingIds.has(p.id));
       console.log(`  Found ${newBookmarks.length} new bookmarks`);
     } catch (error: any) {
       console.error('Error refreshing bookmarks:', error.message);
       errors.push(`Bookmarks: ${error.message}`);
     }
 
-    // Save new posts
-    if (newPosts.length > 0) {
-      store.savePosts(session.xUserId, newPosts);
+    // Save new bookmarks
+    if (newBookmarks.length > 0) {
+      store.savePosts(session.xUserId, newBookmarks);
     }
 
-    console.log(`Refresh complete: ${newPosts.length} new posts`);
+    // Update last sync time
+    store.updateSession(session.sessionId, {
+      lastSyncAt: new Date().toISOString(),
+    });
+
+    console.log(`Refresh complete: ${newBookmarks.length} new bookmarks`);
 
     res.json({
       success: true,
       data: {
-        newPostsCount: newPosts.length,
-        posts: newPosts,
+        newPostsCount: newBookmarks.length,
+        posts: newBookmarks,
         errors: errors.length > 0 ? errors : undefined,
       },
     });

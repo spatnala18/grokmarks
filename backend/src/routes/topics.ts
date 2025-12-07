@@ -5,6 +5,7 @@ import { TopicSpaceDetailResponse, SegmentedPodcastScript } from '../types';
 import { generateBriefing, generatePodcastScript, answerQuestion, generateThread } from '../services/grok-actions';
 import { extractTrending } from '../services/trending';
 import { generateSegmentedPodcastAudio, getPodcastPath } from '../services/grok-voice';
+import { createCustomTopicSpaces } from '../services/topic-classifier';
 import type { VoiceId } from '../services/grok-voice';
 
 const router = Router();
@@ -22,7 +23,7 @@ router.get('/', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   const topicSpaces = store.getAllTopicSpaces(session.xUserId);
 
   // Sort by post count (descending)
-  const sorted = topicSpaces.sort((a, b) => b.postIds.length - a.postIds.length);
+  const sorted = topicSpaces.sort((a, b) => b.bookmarkTweetIds.length - a.bookmarkTweetIds.length);
 
   res.json({
     success: true,
@@ -32,8 +33,10 @@ router.get('/', requireAuth, (req: AuthenticatedRequest, res: Response) => {
         id: ts.id,
         title: ts.title,
         description: ts.description,
-        postCount: ts.postIds.length,
+        type: ts.type,
+        postCount: ts.bookmarkTweetIds.length,
         newPostCount: ts.newPostCount,
+        lastBookmarkTime: ts.lastBookmarkTime,
         updatedAt: ts.updatedAt,
       })),
     },
@@ -59,7 +62,7 @@ router.get('/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   }
 
   // Get the posts for this topic
-  const posts = store.getPostsByIds(session.xUserId, topicSpace.postIds);
+  const posts = store.getPostsByIds(session.xUserId, topicSpace.bookmarkTweetIds);
 
   // Sort posts by date (newest first)
   posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -76,6 +79,159 @@ router.get('/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   res.json({
     success: true,
     data: response,
+  });
+});
+
+/**
+ * POST /api/topics/custom
+ * 
+ * Create custom topic spaces from user-provided topic names.
+ * Classifies all user's bookmarks into the specified topics.
+ * Body: { topicNames: string[] }
+ */
+router.post('/custom', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { topicNames } = req.body;
+
+  if (!topicNames || !Array.isArray(topicNames) || topicNames.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'topicNames array is required and must not be empty',
+    });
+  }
+
+  // Validate topic names
+  const validTopicNames = topicNames
+    .map(n => (typeof n === 'string' ? n.trim() : ''))
+    .filter(n => n.length > 0);
+
+  if (validTopicNames.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'At least one valid topic name is required',
+    });
+  }
+
+  if (validTopicNames.length > 15) {
+    return res.status(400).json({
+      success: false,
+      error: 'Maximum 15 custom topics allowed',
+    });
+  }
+
+  try {
+    console.log(`Creating custom topics for @${session.xUsername}: ${validTopicNames.join(', ')}`);
+    
+    // Get all posts for this user
+    const allPosts = store.getAllPosts(session.xUserId);
+    
+    if (allPosts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No bookmarks found. Please sync your bookmarks first.',
+      });
+    }
+
+    // Classify into custom topics
+    const { posts: classifiedPosts, topicSpaces, stats } = await createCustomTopicSpaces(
+      allPosts,
+      session.xUserId,
+      validTopicNames
+    );
+
+    // Update posts with classification results
+    store.savePosts(session.xUserId, classifiedPosts);
+
+    // Save the custom topic spaces (don't clear existing auto topics)
+    store.saveTopicSpaces(session.xUserId, topicSpaces);
+
+    console.log(`Custom topics created: ${topicSpaces.length} topics from ${stats.totalPosts} bookmarks`);
+
+    res.json({
+      success: true,
+      data: {
+        topicSpaces: topicSpaces.map(ts => ({
+          id: ts.id,
+          title: ts.title,
+          description: ts.description,
+          type: ts.type,
+          postCount: ts.bookmarkTweetIds.length,
+          lastBookmarkTime: ts.lastBookmarkTime,
+        })),
+        stats,
+      },
+    });
+  } catch (error: any) {
+    console.error('Custom topics error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create custom topics',
+    });
+  }
+});
+
+/**
+ * GET /api/topics/:id/search
+ * 
+ * Search within a topic's bookmarks
+ * Query: q (search query)
+ */
+router.get('/:id/search', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const session = req.session!;
+  const { id } = req.params;
+  const query = (req.query.q as string || '').trim().toLowerCase();
+
+  if (!query) {
+    return res.status(400).json({
+      success: false,
+      error: 'Search query (q) is required',
+    });
+  }
+
+  const topicSpace = store.getTopicSpace(session.xUserId, id);
+  
+  if (!topicSpace) {
+    return res.status(404).json({
+      success: false,
+      error: 'Topic Space not found',
+    });
+  }
+
+  // Get the posts for this topic
+  const posts = store.getPostsByIds(session.xUserId, topicSpace.bookmarkTweetIds);
+
+  // Simple keyword search
+  const searchTerms = query.split(/\s+/).filter(t => t.length > 0);
+  
+  const matchedPosts = posts.filter(post => {
+    const searchableText = `${post.text} ${post.authorUsername} ${post.authorDisplayName} ${post.summary || ''}`.toLowerCase();
+    return searchTerms.some(term => searchableText.includes(term));
+  });
+
+  // Score and sort by relevance (number of matching terms)
+  const scoredPosts = matchedPosts.map(post => {
+    const searchableText = `${post.text} ${post.authorUsername} ${post.authorDisplayName} ${post.summary || ''}`.toLowerCase();
+    let score = 0;
+    for (const term of searchTerms) {
+      const matches = (searchableText.match(new RegExp(term, 'g')) || []).length;
+      score += matches;
+    }
+    return { post, score };
+  });
+
+  // Sort by score descending, then by date
+  scoredPosts.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return new Date(b.post.createdAt).getTime() - new Date(a.post.createdAt).getTime();
+  });
+
+  res.json({
+    success: true,
+    data: {
+      query,
+      totalResults: scoredPosts.length,
+      posts: scoredPosts.map(sp => sp.post),
+    },
   });
 });
 
@@ -123,7 +279,7 @@ router.post('/:id/briefing', requireAuth, async (req: AuthenticatedRequest, res:
     });
   }
 
-  const posts = store.getPostsByIds(session.xUserId, topicSpace.postIds);
+  const posts = store.getPostsByIds(session.xUserId, topicSpace.bookmarkTweetIds);
 
   if (posts.length === 0) {
     return res.status(400).json({
@@ -174,7 +330,7 @@ router.post('/:id/podcast', requireAuth, async (req: AuthenticatedRequest, res: 
     });
   }
 
-  const posts = store.getPostsByIds(session.xUserId, topicSpace.postIds);
+  const posts = store.getPostsByIds(session.xUserId, topicSpace.bookmarkTweetIds);
 
   if (posts.length === 0) {
     return res.status(400).json({
@@ -236,7 +392,7 @@ router.post('/:id/qa', requireAuth, async (req: AuthenticatedRequest, res: Respo
     });
   }
 
-  const posts = store.getPostsByIds(session.xUserId, topicSpace.postIds);
+  const posts = store.getPostsByIds(session.xUserId, topicSpace.bookmarkTweetIds);
 
   if (posts.length === 0) {
     return res.status(400).json({
@@ -286,7 +442,7 @@ router.post('/:id/thread', requireAuth, async (req: AuthenticatedRequest, res: R
     });
   }
 
-  const posts = store.getPostsByIds(session.xUserId, topicSpace.postIds);
+  const posts = store.getPostsByIds(session.xUserId, topicSpace.bookmarkTweetIds);
 
   if (posts.length === 0) {
     return res.status(400).json({

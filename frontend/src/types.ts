@@ -9,6 +9,11 @@ export interface User {
   profileImageUrl: string;
 }
 
+/**
+ * Type of topic - auto-discovered by Grok or custom user-defined
+ */
+export type TopicType = 'auto' | 'custom';
+
 export interface Post {
   id: string;
   text: string;
@@ -19,17 +24,25 @@ export interface Post {
   createdAt: string;
   source: 'bookmark' | 'timeline';
   url: string;
-  topicLabel?: string;
+  topicLabels?: string[];  // Can have multiple topics
   summary?: string;
+  publicMetrics?: {
+    likeCount: number;
+    retweetCount: number;
+    replyCount: number;
+    quoteCount: number;
+  };
 }
 
 export interface TopicSpace {
   id: string;
   title: string;
   description: string;
+  type: TopicType;
   postCount: number;
   newPostCount: number;
-  postIds: string[];
+  bookmarkTweetIds: string[];
+  lastBookmarkTime: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -76,7 +89,6 @@ export interface AuthStatus {
 export interface SyncResult {
   totalPosts: number;
   bookmarksCount: number;
-  timelineCount: number;
   topicSpacesCount: number;
   topicSpaces: TopicSpace[];
 }

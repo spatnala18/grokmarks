@@ -3,23 +3,27 @@ import { grokFast, grokStrong, parseJsonResponse, ChatMessage } from './grok';
 import { normalizeLabels, applyTopicCap } from './label-normalizer';
 import { classificationCache } from '../store/classification-cache';
 import { HYPERPARAMS } from '../config/hyperparams';
-import { Post, TopicSpace } from '../types';
+import { Post, TopicSpace, TopicType } from '../types';
 
 // ============================================
-// Topic Classification Service (v2)
+// Topic Classification Service (v3)
 // ============================================
-// Improved with:
+// Features:
 // - Per-post caching
 // - Label normalization
 // - Topic cap with Long Tail merging
 // - Configurable hyperparameters
+// - Bookmarks-only classification
+// - Custom topics support
+// - Multi-topic assignment (when appropriate)
 
 /**
  * Classification result for a single post
+ * Supports multiple topics
  */
 interface PostClassification {
   id: string;
-  topic: string;
+  topics: string[];  // Can be multiple topics (usually 1, rarely 2+)
   summary: string;
 }
 
@@ -39,6 +43,14 @@ interface TopicInfo {
 }
 
 /**
+ * Options for classification
+ */
+export interface ClassificationOptions {
+  topicType: TopicType;              // 'auto' or 'custom'
+  customTopicNames?: string[];       // User-provided topic names (for custom type)
+}
+
+/**
  * Stats from a classification run
  */
 export interface ClassificationStats {
@@ -55,13 +67,20 @@ export interface ClassificationStats {
 }
 
 /**
+ * Filter posts to only include bookmarks
+ */
+export function filterBookmarksOnly(posts: Post[]): Post[] {
+  return posts.filter(p => p.source === 'bookmark');
+}
+
+/**
  * Classify posts with caching support
  * Only sends uncached/changed posts to Grok
  */
 export async function classifyPosts(
   posts: Post[],
   xUserId: string,
-  existingTopics: string[] = []
+  options: ClassificationOptions = { topicType: 'auto' }
 ): Promise<{ classifiedPosts: Post[]; stats: Partial<ClassificationStats> }> {
   if (posts.length === 0) {
     return { classifiedPosts: [], stats: { totalPosts: 0, cachedPosts: 0, classifiedPosts: 0 } };
@@ -71,8 +90,11 @@ export async function classifyPosts(
   const postsToClassify: Post[] = [];
   let cachedCount = 0;
 
-  // Step 1: Check cache for each post
-  if (HYPERPARAMS.ENABLE_CACHE && HYPERPARAMS.SKIP_CACHED_POSTS) {
+  // For custom topics, we skip cache since the topic names are user-defined
+  const useCache = options.topicType === 'auto' && HYPERPARAMS.ENABLE_CACHE && HYPERPARAMS.SKIP_CACHED_POSTS;
+
+  // Step 1: Check cache for each post (only for auto topics)
+  if (useCache) {
     for (const post of posts) {
       const cached = classificationCache.get(xUserId, post.id, post.text);
       
@@ -80,12 +102,11 @@ export async function classifyPosts(
         // Use cached classification
         classifiedPosts.push({
           ...post,
-          topicLabel: cached.topicLabel,
+          topicLabels: [cached.topicLabel],
           summary: cached.summary,
         });
         cachedCount++;
       } else {
-        // Need to classify
         postsToClassify.push(post);
       }
     }
@@ -108,45 +129,45 @@ export async function classifyPosts(
     console.log(`  Classifying batch ${batchNum}/${totalBatches} (${batch.length} posts)...`);
     
     try {
-      const batchResults = await classifyBatch(batch, existingTopics);
+      const batchResults = await classifyBatch(batch, options);
       grokCalls++;
       
-      // Process results and cache them
+      // Process results and cache them (cache only for auto topics)
       const cacheEntries: Array<{ postId: string; text: string; topicLabel: string; summary: string }> = [];
       
       for (const post of batch) {
         const classification = batchResults.find(c => c.id === post.id);
         
-        if (classification) {
+        if (classification && classification.topics.length > 0) {
           classifiedPosts.push({
             ...post,
-            topicLabel: classification.topic,
+            topicLabels: classification.topics,
             summary: classification.summary,
           });
           
-          cacheEntries.push({
-            postId: post.id,
-            text: post.text,
-            topicLabel: classification.topic,
-            summary: classification.summary,
-          });
-          
-          // Track topics for consistency
-          if (!existingTopics.includes(classification.topic)) {
-            existingTopics.push(classification.topic);
+          // Cache only the primary topic for auto-discovered topics
+          if (options.topicType === 'auto') {
+            cacheEntries.push({
+              postId: post.id,
+              text: post.text,
+              topicLabel: classification.topics[0], // Primary topic
+              summary: classification.summary,
+            });
           }
         } else {
           // Classification failed for this post
           classifiedPosts.push({
             ...post,
-            topicLabel: 'Uncategorized',
+            topicLabels: ['Uncategorized'],
             summary: post.text.slice(0, 100) + (post.text.length > 100 ? '...' : ''),
           });
         }
       }
       
-      // Batch cache the results
-      classificationCache.setMany(xUserId, cacheEntries);
+      // Batch cache the results (only for auto topics)
+      if (options.topicType === 'auto' && cacheEntries.length > 0) {
+        classificationCache.setMany(xUserId, cacheEntries);
+      }
       
     } catch (error) {
       console.error(`  Error classifying batch:`, error);
@@ -156,7 +177,7 @@ export async function classifyPosts(
       for (const post of batch) {
         classifiedPosts.push({
           ...post,
-          topicLabel: 'Uncategorized',
+          topicLabels: ['Uncategorized'],
           summary: post.text.slice(0, 100) + (post.text.length > 100 ? '...' : ''),
         });
       }
@@ -179,7 +200,7 @@ export async function classifyPosts(
  */
 async function classifyBatch(
   posts: Post[],
-  existingTopics: string[]
+  options: ClassificationOptions
 ): Promise<PostClassification[]> {
   const maxTextLen = HYPERPARAMS.CLASSIFICATION_MAX_TEXT_LENGTH;
   
@@ -187,28 +208,53 @@ async function classifyBatch(
     `[${idx + 1}] ID: ${p.id}\n@${p.authorUsername}: ${p.text.slice(0, maxTextLen)}`
   ).join('\n\n');
 
-  const topicsHint = existingTopics.length > 0 
-    ? `\nPrefer using these existing topics when appropriate: ${existingTopics.slice(0, 20).join(', ')}\nBut create new topics if the content doesn't fit.`
-    : '';
+  let systemPrompt: string;
+  
+  if (options.topicType === 'custom' && options.customTopicNames && options.customTopicNames.length > 0) {
+    // Custom topics: classify into user-provided categories
+    const topicsList = options.customTopicNames.join(', ');
+    systemPrompt = `You are a tweet classifier. Your job is to:
+1. Assign each tweet to ONE OR MORE of these user-defined topics: ${topicsList}
+2. Write a 1-2 sentence summary of each tweet
 
-  const systemPrompt = `You are a tweet classifier. Your job is to:
-1. Assign each tweet to a topic category (e.g., "AI/ML", "GPU Programming", "Startups", "Science", "Politics", etc.)
+Guidelines:
+- You MUST use ONLY the provided topic names exactly as written
+- Most tweets should go to exactly ONE topic
+- Only assign multiple topics if the tweet genuinely fits multiple categories
+- If a tweet doesn't fit any topic well, assign it to the closest match
+- Summaries should capture the key point, not just repeat the tweet
+- Base everything ONLY on the tweet content provided
+
+Return your response as JSON with this exact structure:
+{
+  "classifications": [
+    { "id": "tweet_id", "topics": ["Topic Name"], "summary": "Brief summary" },
+    { "id": "tweet_id2", "topics": ["Topic A", "Topic B"], "summary": "Brief summary" },
+    ...
+  ]
+}`;
+  } else {
+    // Auto topics: let Grok discover categories
+    systemPrompt = `You are a tweet classifier. Your job is to:
+1. Assign each tweet to ONE topic category (e.g., "AI/ML", "GPU Programming", "Startups", "Science", "Politics", etc.)
 2. Write a 1-2 sentence summary of each tweet
 
 Guidelines:
 - Topic names should be concise (2-4 words max)
 - Topics should be specific enough to be useful but general enough to group related tweets
+- Most tweets should go to exactly ONE topic
+- Only use multiple topics if genuinely applicable (rare)
 - Summaries should capture the key point, not just repeat the tweet
 - Base everything ONLY on the tweet content provided
-${topicsHint}
 
 Return your response as JSON with this exact structure:
 {
   "classifications": [
-    { "id": "tweet_id", "topic": "Topic Name", "summary": "Brief summary" },
+    { "id": "tweet_id", "topics": ["Topic Name"], "summary": "Brief summary" },
     ...
   ]
 }`;
+  }
 
   const userPrompt = `Classify these ${posts.length} tweets:\n\n${postsText}`;
 
@@ -230,29 +276,35 @@ Return your response as JSON with this exact structure:
 
 /**
  * Group classified posts by topic label
+ * Since posts can have multiple topics, a post may appear in multiple groups
  */
 export function groupPostsByTopic(posts: Post[]): Map<string, Post[]> {
   const topicGroups = new Map<string, Post[]>();
 
   for (const post of posts) {
-    const topic = post.topicLabel || 'Uncategorized';
-    const existing = topicGroups.get(topic) || [];
-    existing.push(post);
-    topicGroups.set(topic, existing);
+    const topics = post.topicLabels || ['Uncategorized'];
+    
+    for (const topic of topics) {
+      const existing = topicGroups.get(topic) || [];
+      existing.push(post);
+      topicGroups.set(topic, existing);
+    }
   }
 
   return topicGroups;
 }
 
 /**
- * Count posts per label
+ * Count posts per label (counting each post once per topic it belongs to)
  */
 function countLabels(posts: Post[]): Map<string, number> {
   const counts = new Map<string, number>();
   
   for (const post of posts) {
-    const label = post.topicLabel || 'Uncategorized';
-    counts.set(label, (counts.get(label) || 0) + 1);
+    const topics = post.topicLabels || ['Uncategorized'];
+    for (const topic of topics) {
+      counts.set(topic, (counts.get(topic) || 0) + 1);
+    }
   }
   
   return counts;
@@ -263,10 +315,31 @@ function countLabels(posts: Post[]): Map<string, number> {
  */
 function applyLabelMapping(posts: Post[], mapping: Map<string, string>): Post[] {
   return posts.map(post => {
-    const originalLabel = post.topicLabel || 'Uncategorized';
-    const newLabel = mapping.get(originalLabel) || originalLabel;
-    return { ...post, topicLabel: newLabel };
+    const originalTopics = post.topicLabels || ['Uncategorized'];
+    const newTopics = originalTopics.map(t => mapping.get(t) || t);
+    // Deduplicate after mapping
+    const uniqueTopics = [...new Set(newTopics)];
+    return { ...post, topicLabels: uniqueTopics };
   });
+}
+
+/**
+ * Compute the lastBookmarkTime for a set of posts
+ */
+function computeLastBookmarkTime(posts: Post[]): string {
+  if (posts.length === 0) {
+    return new Date().toISOString();
+  }
+  
+  let maxTime = 0;
+  for (const post of posts) {
+    const time = new Date(post.createdAt).getTime();
+    if (time > maxTime) {
+      maxTime = time;
+    }
+  }
+  
+  return new Date(maxTime).toISOString();
 }
 
 /**
@@ -342,6 +415,7 @@ ${summaries}`;
  */
 export async function createTopicSpaces(
   posts: Post[],
+  topicType: TopicType,
   generateDescriptions: boolean = true
 ): Promise<{ topicSpaces: TopicSpace[]; grokCalls: number }> {
   const topicGroups = groupPostsByTopic(posts);
@@ -373,11 +447,15 @@ export async function createTopicSpaces(
     }
 
     const now = new Date().toISOString();
+    const lastBookmarkTime = computeLastBookmarkTime(topicPosts);
+    
     topicSpaces.push({
       id: uuidv4(),
       title,
       description,
-      postIds: topicPosts.map(p => p.id),
+      type: topicType,
+      bookmarkTweetIds: topicPosts.map(p => p.id),
+      lastBookmarkTime,
       createdAt: now,
       updatedAt: now,
       newPostCount: 0,
@@ -388,16 +466,16 @@ export async function createTopicSpaces(
 }
 
 /**
- * Full pipeline: classify posts and create TopicSpaces
+ * Full pipeline: classify bookmarks and create TopicSpaces (auto-discovered topics)
  * With caching, normalization, and topic cap
  */
 export async function classifyAndCreateTopicSpaces(
   posts: Post[],
   xUserId: string,
-  existingTopics: string[] = []
+  options: ClassificationOptions = { topicType: 'auto' }
 ): Promise<{ posts: Post[]; topicSpaces: TopicSpace[]; stats: ClassificationStats }> {
   console.log(`\n=== Starting Classification Pipeline ===`);
-  console.log(`  Posts: ${posts.length}, Cache: ${HYPERPARAMS.ENABLE_CACHE ? 'ON' : 'OFF'}, Normalization: ${HYPERPARAMS.ENABLE_NORMALIZATION ? 'ON' : 'OFF'}`);
+  console.log(`  Posts: ${posts.length}, Type: ${options.topicType}, Cache: ${HYPERPARAMS.ENABLE_CACHE ? 'ON' : 'OFF'}, Normalization: ${HYPERPARAMS.ENABLE_NORMALIZATION ? 'ON' : 'OFF'}`);
   
   // Initialize stats
   const stats: ClassificationStats = {
@@ -417,9 +495,20 @@ export async function classifyAndCreateTopicSpaces(
     return { posts: [], topicSpaces: [], stats };
   }
 
-  // Step 1: Classify posts (with caching)
+  // Filter to bookmarks only
+  const bookmarkPosts = filterBookmarksOnly(posts);
+  console.log(`  Bookmarks: ${bookmarkPosts.length}/${posts.length} posts`);
+  
+  if (bookmarkPosts.length === 0) {
+    console.log('  No bookmarks to classify');
+    return { posts: [], topicSpaces: [], stats };
+  }
+  
+  stats.totalPosts = bookmarkPosts.length;
+
+  // Step 1: Classify posts (with caching for auto topics only)
   console.log(`\n[Step 1] Classifying posts...`);
-  const { classifiedPosts, stats: classifyStats } = await classifyPosts(posts, xUserId, existingTopics);
+  const { classifiedPosts, stats: classifyStats } = await classifyPosts(bookmarkPosts, xUserId, options);
   stats.cachedPosts = classifyStats.cachedPosts || 0;
   stats.classifiedPosts = classifyStats.classifiedPosts || 0;
   stats.grokCallsClassification = classifyStats.grokCallsClassification || 0;
@@ -429,39 +518,52 @@ export async function classifyAndCreateTopicSpaces(
   stats.rawLabelCount = rawLabelCounts.size;
   console.log(`  Raw labels: ${stats.rawLabelCount}`);
 
-  // Step 2: Normalize labels (if enabled)
-  console.log(`\n[Step 2] Normalizing labels...`);
-  const normResult = await normalizeLabels(rawLabelCounts);
-  if (normResult.success && HYPERPARAMS.ENABLE_NORMALIZATION) {
-    stats.grokCallsNormalization = 1;
-  }
-  
-  // Step 3: Apply topic cap
-  console.log(`\n[Step 3] Applying topic cap...`);
-  const finalMapping = applyTopicCap(rawLabelCounts, normResult.mapping);
-  
-  // Apply mapping to posts
-  const normalizedPosts = applyLabelMapping(classifiedPosts, finalMapping);
-  
-  // Update cache with normalized labels
-  if (HYPERPARAMS.ENABLE_CACHE) {
-    classificationCache.applyNormalization(xUserId, finalMapping);
-  }
-  
-  // Count canonical labels (excluding Long Tail)
-  const canonicalCounts = countLabels(normalizedPosts);
-  stats.canonicalLabelCount = Array.from(canonicalCounts.keys())
-    .filter(l => l !== HYPERPARAMS.LONG_TAIL_LABEL).length;
-  stats.longTailPostCount = canonicalCounts.get(HYPERPARAMS.LONG_TAIL_LABEL) || 0;
-  
-  console.log(`  Canonical labels: ${stats.canonicalLabelCount}`);
-  if (stats.longTailPostCount > 0) {
-    console.log(`  Long Tail posts: ${stats.longTailPostCount}`);
+  let finalPosts = classifiedPosts;
+
+  // For auto topics: apply normalization and topic cap
+  // For custom topics: skip these steps since user defined the topics
+  if (options.topicType === 'auto') {
+    // Step 2: Normalize labels (if enabled)
+    console.log(`\n[Step 2] Normalizing labels...`);
+    const normResult = await normalizeLabels(rawLabelCounts);
+    if (normResult.success && HYPERPARAMS.ENABLE_NORMALIZATION) {
+      stats.grokCallsNormalization = 1;
+    }
+    
+    // Step 3: Apply topic cap
+    console.log(`\n[Step 3] Applying topic cap...`);
+    const finalMapping = applyTopicCap(rawLabelCounts, normResult.mapping);
+    
+    // Apply mapping to posts
+    finalPosts = applyLabelMapping(classifiedPosts, finalMapping);
+    
+    // Update cache with normalized labels
+    if (HYPERPARAMS.ENABLE_CACHE) {
+      classificationCache.applyNormalization(xUserId, finalMapping);
+    }
+    
+    // Count canonical labels (excluding Long Tail)
+    const canonicalCounts = countLabels(finalPosts);
+    stats.canonicalLabelCount = Array.from(canonicalCounts.keys())
+      .filter(l => l !== HYPERPARAMS.LONG_TAIL_LABEL).length;
+    stats.longTailPostCount = canonicalCounts.get(HYPERPARAMS.LONG_TAIL_LABEL) || 0;
+    
+    console.log(`  Canonical labels: ${stats.canonicalLabelCount}`);
+    if (stats.longTailPostCount > 0) {
+      console.log(`  Long Tail posts: ${stats.longTailPostCount}`);
+    }
+  } else {
+    // For custom topics, just count the labels
+    stats.canonicalLabelCount = rawLabelCounts.size;
+    console.log(`\n[Step 2-3] Skipped (custom topics)`);
   }
 
   // Step 4: Create TopicSpaces
   console.log(`\n[Step 4] Creating Topic Spaces...`);
-  const { topicSpaces, grokCalls: descriptionCalls } = await createTopicSpaces(normalizedPosts);
+  const { topicSpaces, grokCalls: descriptionCalls } = await createTopicSpaces(
+    finalPosts, 
+    options.topicType
+  );
   stats.topicSpaceCount = topicSpaces.length;
   stats.grokCallsDescriptions = descriptionCalls;
 
@@ -471,10 +573,25 @@ export async function classifyAndCreateTopicSpaces(
     console.log(`  Total posts: ${stats.totalPosts}`);
     console.log(`  Cached: ${stats.cachedPosts}, Classified: ${stats.classifiedPosts}`);
     console.log(`  Raw labels: ${stats.rawLabelCount} → Canonical: ${stats.canonicalLabelCount}`);
-    console.log(`  Topic Spaces: ${stats.topicSpaceCount}`);
+    console.log(`  Topic Spaces: ${stats.topicSpaceCount} (type: ${options.topicType})`);
     console.log(`  Grok calls: ${stats.grokCallsClassification} classification + ${stats.grokCallsNormalization} normalization + ${stats.grokCallsDescriptions} descriptions`);
     console.log(`================================\n`);
   }
 
-  return { posts: normalizedPosts, topicSpaces, stats };
+  return { posts: finalPosts, topicSpaces, stats };
+}
+
+/**
+ * Create custom topic spaces from user-provided topic names
+ * Classifies bookmarks into the specified topics
+ */
+export async function createCustomTopicSpaces(
+  posts: Post[],
+  xUserId: string,
+  topicNames: string[]
+): Promise<{ posts: Post[]; topicSpaces: TopicSpace[]; stats: ClassificationStats }> {
+  return classifyAndCreateTopicSpaces(posts, xUserId, {
+    topicType: 'custom',
+    customTopicNames: topicNames,
+  });
 }

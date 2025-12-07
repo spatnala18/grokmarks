@@ -8,6 +8,11 @@
 export type PostSource = 'bookmark' | 'timeline' | 'like' | 'list' | 'search';
 
 /**
+ * Type of topic - auto-discovered by Grok or custom user-defined
+ */
+export type TopicType = 'auto' | 'custom';
+
+/**
  * Post - normalized tweet with metadata
  */
 export interface Post {
@@ -21,19 +26,29 @@ export interface Post {
   url: string;                   // Link to tweet on X
   source: PostSource;
   
+  // Engagement metrics (for ranking in Live tab)
+  publicMetrics?: {
+    likeCount: number;
+    retweetCount: number;
+    replyCount: number;
+    quoteCount: number;
+  };
+  
   // Grok-generated fields (populated after classification)
   summary?: string;              // 1-2 sentence summary
-  topicLabel?: string;           // Assigned topic label
+  topicLabels?: string[];        // Assigned topic labels (can be multiple)
 }
 
 /**
- * TopicSpace - a cluster of related posts
+ * TopicSpace - a cluster of related bookmarked posts
  */
 export interface TopicSpace {
   id: string;                    // Generated unique ID
   title: string;                 // e.g., "CUDA & GPU Programming"
   description: string;           // Grok-generated description
-  postIds: string[];             // References to Post IDs
+  type: TopicType;               // 'auto' or 'custom'
+  bookmarkTweetIds: string[];    // References to bookmarked Post IDs only
+  lastBookmarkTime: string;      // ISO timestamp of the most recent bookmark in this topic
   createdAt: string;             // ISO timestamp
   updatedAt: string;             // ISO timestamp
   newPostCount: number;          // Posts added since last view (for "new" badge)
